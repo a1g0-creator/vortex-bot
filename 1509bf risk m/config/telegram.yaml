@@ -1,0 +1,76 @@
+# ===========================================
+# КОНФИГУРАЦИЯ TELEGRAM БОТА
+# ===========================================
+
+# Основные настройки бота
+bot:
+  # Токен бота (получите у @BotFather)
+  token: "8072495280:AAGQqCfJS3mRQ3y09pNqN7p-l-AnN3-JAD0"
+  
+  # ID чата для уведомлений (получите у @userinfobot)
+  chat_id: "1753045590"
+  
+  # Таймаут для запросов (секунды)
+  timeout: 30
+  
+  # Включить/выключить бота
+  enabled: true
+
+# Настройки уведомлений
+notifications:
+  # Уведомления о сделках
+  trades:
+    enabled: true
+    include_details: true
+    
+  # Риск-алерты
+  risk_alerts:
+    enabled: true
+    loss_threshold: 0.06  # USDT
+    
+  # Системные уведомления
+  system:
+    startup: true
+    shutdown: true
+    errors: true
+    
+  # Статистика
+  statistics:
+    daily_report: true
+    weekly_report: false
+
+# Настройки интерфейса
+interface:
+  # Язык интерфейса
+  language: "ru"
+  
+  # Клавиатура
+  keyboard:
+    enabled: true
+    persistent: true
+    
+  # Форматирование сообщений
+  formatting:
+    use_markdown: true
+    emoji: true
+    max_message_length: 4000
+
+# Команды и разрешения
+commands:
+  # Разрешенные пользователи (chat_id)
+  allowed_users:
+    - "1753045590"
+    
+  # Административные команды
+  admin_commands:
+    - "start"
+    - "stop" 
+    - "restart"
+    - "mode"
+    
+  # Команды только для чтения
+  readonly_commands:
+    - "status"
+    - "balance"
+    - "positions"
+    - "help"

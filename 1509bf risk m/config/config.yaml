@@ -1,0 +1,320 @@
+# Основная конфигурация Vortex Trading Bot
+# Этот файл содержит все базовые настройки системы
+
+# ===========================================
+# ИНФОРМАЦИЯ О ПРИЛОЖЕНИИ
+# ===========================================
+app:
+  name: "Vortex Trading Bot"
+  version: "2.1.0"
+  description: "Автоматический торговый бот с индикатором Vortex Bands"
+  author: "Yaseneko Maxim"
+  environment: "development"  # development, production, testing
+
+# ===========================================
+# НАСТРОЙКИ ЛОГИРОВАНИЯ
+# ===========================================
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+  
+  # Файлы логов
+  files:
+    main: "logs/trading_bot.log"
+    error: "logs/error.log"
+    trading: "logs/trading.log"
+    telegram: "logs/telegram.log"
+  
+  # Ротация логов
+  rotation:
+    max_size: "10MB"
+    backup_count: 7
+    when: "midnight"
+    interval: 1
+  
+  # Уровни для разных модулей
+  modules:
+    trading_engine: "INFO"
+    bybit_adapter: "INFO"
+    telegram_bot: "INFO"
+    web_api: "DEBUG"
+    database: "WARNING"
+
+# ===========================================
+# БАЗА ДАННЫХ
+# ===========================================
+database:
+  # PostgreSQL основная БД
+  postgresql:
+    host: "localhost"
+    port: 5432
+    database: "vortex_trading_bot"
+    username: "vortex_user"
+    password: "vortex_password"
+    pool_size: 10
+    max_overflow: 20
+    pool_timeout: 30
+    
+  # Redis для кэширования
+  redis:
+    host: "localhost"
+    port: 6379
+    database: 0
+    password: null
+    connection_pool_size: 10
+    socket_timeout: 5
+    
+  # Настройки миграций
+  migrations:
+    auto_upgrade: true
+    backup_before_upgrade: true
+
+# ===========================================
+# WEB API НАСТРОЙКИ
+# ===========================================
+web_api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  reload: true  # только для development
+  
+  # CORS настройки
+  cors:
+    allow_origins: ["*"]
+    allow_methods: ["*"]
+    allow_headers: ["*"]
+    allow_credentials: true
+  
+  # JWT аутентификация
+  jwt:
+    secret_key: "your-super-secret-jwt-key-change-in-production"
+    algorithm: "HS256"
+    access_token_expire_minutes: 1440  # 24 часа
+    
+  # Rate limiting
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 60
+    burst_size: 10
+
+# ===========================================
+# WEBSOCKET НАСТРОЙКИ
+# ===========================================
+websocket:
+  heartbeat_interval: 30
+  connection_timeout: 60
+  max_connections: 100
+  message_queue_size: 1000
+
+# ===========================================
+# СИСТЕМА БЕЗОПАСНОСТИ
+# ===========================================
+security:
+  # Шифрование API ключей
+  encryption:
+    enabled: true
+    algorithm: "AES-256-GCM"
+    key_derivation: "PBKDF2-SHA256"
+    iterations: 100000
+    
+  # IP ограничения
+  ip_restrictions:
+    enabled: false
+    allowed_ips: []
+    blocked_ips: []
+    
+  # Сессии
+  sessions:
+    timeout_minutes: 480  # 8 часов
+    max_concurrent_sessions: 3
+
+# ===========================================
+# МОНИТОРИНГ И АЛЕРТЫ
+# ===========================================
+monitoring:
+  # Интервалы проверок (в секундах)
+  intervals:
+    system_health: 60
+    exchange_connectivity: 30
+    position_updates: 10
+    balance_updates: 60
+    
+  # Пороги для алертов
+  thresholds:
+    cpu_usage_percent: 80
+    memory_usage_percent: 85
+    disk_usage_percent: 90
+    api_response_time_ms: 5000
+    
+  # Health checks
+  health_checks:
+    enabled: true
+    endpoint: "/health"
+    database_check: true
+    redis_check: true
+    exchange_check: true
+
+# ===========================================
+# СИСТЕМА РЕЗЕРВНОГО КОПИРОВАНИЯ
+# ===========================================
+backup:
+  enabled: true
+  
+  # Локальные бэкапы
+  local:
+    directory: "backups"
+    retention_days: 30
+    
+  # Google Drive интеграция
+  google_drive:
+    enabled: false
+    credentials_file: "google_drive_credentials.json"
+    folder_id: null
+    
+  # Расписание
+  schedule:
+    database_backup: "0 2 * * *"  # Каждый день в 2:00
+    config_backup: "0 3 * * 0"   # Каждое воскресенье в 3:00
+    logs_archive: "0 4 * * 0"    # Каждое воскресенье в 4:00
+
+# ===========================================
+# ПРОИЗВОДИТЕЛЬНОСТЬ
+# ===========================================
+performance:
+  # Размеры пулов
+  thread_pool_size: 10
+  async_pool_size: 20
+  
+  # Кэширование
+  cache:
+    default_ttl: 300  # 5 минут
+    market_data_ttl: 60  # 1 минута
+    instrument_info_ttl: 3600  # 1 час
+    
+  # Оптимизации
+  optimizations:
+    enable_async_processing: true
+    enable_result_caching: true
+    enable_request_batching: true
+
+# ===========================================
+# РАЗРАБОТКА И ОТЛАДКА
+# ===========================================
+development:
+  debug_mode: true
+  hot_reload: true
+  profiling: false
+  
+  # Тестовые данные
+  test_data:
+    generate_mock_trades: false
+    mock_exchange_responses: false
+    
+  # Swagger документация
+  swagger:
+    enabled: true
+    title: "Vortex Trading Bot API"
+    description: "REST API для управления торговым ботом"
+    version: "2.1.0"
+
+# ===========================================
+# ИНТЕГРАЦИИ
+# ===========================================
+integrations:
+  # Email уведомления
+  email:
+    enabled: false
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    username: ""
+    password: ""
+    from_address: ""
+    
+  # Push уведомления
+  push_notifications:
+    enabled: false
+    service: "firebase"  # firebase, onesignal
+    api_key: ""
+    
+  # Внешние аналитические сервисы
+  analytics:
+    enabled: false
+    google_analytics_id: ""
+    mixpanel_token: ""
+
+# ===========================================
+# ЛИМИТЫ И ОГРАНИЧЕНИЯ
+# ===========================================
+limits:
+  # API лимиты
+  api:
+    max_requests_per_second: 10
+    max_concurrent_requests: 50
+    timeout_seconds: 30
+    
+  # Файловые лимиты
+  files:
+    max_log_file_size: "100MB"
+    max_backup_file_size: "500MB"
+    max_upload_file_size: "10MB"
+    
+  # Системные лимиты
+  system:
+    max_memory_usage_mb: 1024
+    max_cpu_usage_percent: 90
+    max_open_files: 1000
+
+# ===========================================
+# FEATURE FLAGS
+# ===========================================
+features:
+  # Основные функции
+  auto_trading: true
+  manual_trading: true
+  paper_trading: true
+  
+  # Экспериментальные функции
+  experimental:
+    ml_predictions: false
+    advanced_analytics: false
+    social_trading: false
+    
+  # A/B тестирование
+  ab_testing:
+    enabled: false
+    experiments: []
+
+# ===========================================
+# ЛОКАЛИЗАЦИЯ
+# ===========================================
+localization:
+  default_language: "ru"
+  supported_languages: ["ru", "en"]
+  timezone: "UTC"
+  currency_format: "USD"
+  number_format: "en_US"
+
+# ===========================================
+# МЕТРИКИ И АНАЛИТИКА
+# ===========================================
+metrics:
+  enabled: true
+  
+  # Экспорт метрик
+  exporters:
+    prometheus:
+      enabled: false
+      port: 9090
+      
+    influxdb:
+      enabled: false
+      host: "localhost"
+      port: 8086
+      database: "trading_metrics"
+      
+  # Интервалы сбора
+  collection_intervals:
+    system_metrics: 30
+    trading_metrics: 10
+    performance_metrics: 60

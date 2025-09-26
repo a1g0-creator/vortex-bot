@@ -1,0 +1,227 @@
+# ===========================================
+# КОНФИГУРАЦИЯ МУЛЬТИБИРЖЕВОГО УПРАВЛЕНИЯ
+# Vortex Trading Bot v2.1
+# ===========================================
+
+# ✅ ИСПРАВЛЕННАЯ СТРУКТУРА для валидатора
+exchanges:
+  # Включенные биржи (ОБЯЗАТЕЛЬНО для валидации)
+  enabled:
+    - "bybit"
+    - "bitget"  # ✅ ИСПРАВЛЕНО: раскомментировано
+  
+  # Приоритеты использования бирж
+  priority:
+    primary: "bybit"
+    secondary: "bitget"
+    fallback: "bybit"
+
+# Общие настройки для всех бирж
+global_settings:
+  # Основная биржа для торговли (primary)
+  primary_exchange: "bybit"
+  
+  # Дополнительные биржи
+  secondary_exchanges:
+    - "bitget"
+  
+  # Режимы работы  
+  mode:
+    current: "single"  # single, arbitrage, copy_trading
+    available: ["single", "arbitrage", "copy_trading"]
+  
+  # Используем mainnet с demo ключами (как в simple_trading_bot)
+  default_network: "mainnet"
+  
+  # Глобальные лимиты
+  global_limits:
+    max_total_exposure_usdt: 10000.0
+    max_positions_per_exchange: 5
+    max_daily_trades: 50
+    
+  # Синхронизация между биржами
+  sync_settings:
+    position_sync_interval: 30  # секунд
+    balance_sync_interval: 60   # секунд
+    price_sync_tolerance: 0.5   # процент расхождения цен
+
+# ===========================================
+# НАСТРОЙКИ BYBIT (основная биржа)
+# ===========================================
+bybit:
+  name: "Bybit"
+  enabled: true
+  priority: 1
+
+  # ВКЛЮЧИТЕ РОВНО ОДНО ОКРУЖЕНИЕ
+  demo:
+    enabled: true                # ← включите true, если хотите демо
+    base_url: "https://api-demo.bybit.com"
+    ws_public: "wss://stream-demo.bybit.com/v5/public/linear"
+    ws_private: "wss://stream-demo.bybit.com/v5/private"
+
+  mainnet:
+    enabled: false                 # ← текущее: mainnet активен
+    base_url: "https://api.bybit.com"
+    ws_public: "wss://stream.bybit.com/v5/public/linear"
+    ws_private: "wss://stream.bybit.com/v5/private"
+
+  api_credentials:
+    demo:
+      api_key: "bPMH8mfMItO2YYMW5Y"      # из вашего файла
+      api_secret: "9XjXgobWEPwonfvFx0kjqWNupsenSCwdJPO0"
+    mainnet:
+      api_key: "bPMH8mfMItO2YYMW5Y"      # из вашего файла
+      api_secret: "9XjXgobWEPwonfvFx0kjqWNupsenSCwdJPO0"
+
+  trading:
+    category: "linear"
+    margin:
+      default_mode: "CROSS"
+      default_leverage: 10
+      max_leverage: 100
+      risk_limit: 200000
+    order_limits:
+      min_order_value_usdt: 5.0
+      max_order_value_usdt: 100000.0
+      max_positions: 10
+    fees:
+      maker: 0.0002
+      taker: 0.0006
+      funding_rate_cap: 0.0075
+
+  rate_limits:
+    order_create: 100
+    order_cancel: 100
+    position_list: 120
+    wallet_balance: 120
+    market_data: 600
+    global_limit: 600
+    request_delay: 0.1
+
+  websocket:
+    enabled: true
+    auto_reconnect: true
+    reconnect_delay: 5
+    max_reconnect_attempts: 10
+    heartbeat_interval: 30
+    subscriptions:
+      klines: true
+      tickers: true
+      positions: true
+      orders: true
+      wallet: true
+
+
+# ===========================================
+# НАСТРОЙКИ BITGET (дополнительная биржа)
+# ===========================================
+bitget:
+  name: "Bitget"
+  enabled: true
+  priority: 2
+
+  demo:
+    enabled: true                  # ← если тестируете Bitget демо
+    base_url: "https://api.bitget.com"
+    ws_public: "wss://ws.bitget.com/mix/v1/stream"
+    ws_private: "wss://ws.bitget.com/mix/v1/stream"
+    sandbox_mode: true
+
+  mainnet:
+    enabled: false
+    base_url: "https://api.bitget.com"
+    ws_public: "wss://ws.bitget.com/mix/v1/stream"
+    ws_private: "wss://ws.bitget.com/mix/v1/stream"
+    sandbox_mode: false
+
+  api_credentials:
+    demo:
+      api_key: "bg_71602df15f47502bcfc9db373fe96043"
+      api_secret: "aeca2d66b4f151ea5289081b2021380032e783d5ce35ff21b351c9d98f99bafd"
+      passphrase: "KamazK5Scania"
+    mainnet:
+      api_key: ""
+      api_secret: ""
+      passphrase: ""
+
+  trading:
+    category: "linear"
+    product_type: "UMCBL"
+    margin:
+      default_mode: "crossed"
+      default_leverage: 10
+      max_leverage: 125
+    order_limits:
+      min_order_value_usdt: 5.0
+      max_order_value_usdt: 100000.0
+      max_positions: 20
+    fees:
+      maker: 0.0002
+      taker: 0.0006
+
+  rate_limits:
+    order_create: 60
+    order_cancel: 60
+    position_list: 100
+    wallet_balance: 100
+    market_data: 300
+    global_limit: 300
+    request_delay: 0.2
+
+  websocket:
+    enabled: true
+    auto_reconnect: true
+    reconnect_delay: 5
+    max_reconnect_attempts: 10
+    heartbeat_interval: 30
+    subscriptions:
+      klines: true
+      tickers: true
+      positions: true
+      orders: true
+      wallet: true
+
+
+# ===========================================
+# АРБИТРАЖНЫЕ НАСТРОЙКИ
+# ===========================================
+arbitrage:
+  enabled: false  # Пока отключен
+  
+  # Параметры арбитража
+  settings:
+    min_spread_percent: 0.1    # Минимальный спред для входа
+    max_position_size_usdt: 1000
+    position_sync_timeout: 10   # секунд
+    
+  # Пары для арбитража
+  pairs:
+    - symbol: "BTCUSDT"
+      min_spread: 0.15
+      max_size: 0.1
+    - symbol: "ETHUSDT" 
+      min_spread: 0.12
+      max_size: 0.5
+
+# ===========================================
+# КОПИ-ТРЕЙДИНГ НАСТРОЙКИ
+# ===========================================
+copy_trading:
+  enabled: false  # Пока отключен
+  
+  # Мастер-биржа (откуда копируем)
+  master_exchange: "bybit"
+  
+  # Подчиненные биржи (куда копируем)
+  slave_exchanges:
+    - name: "bitget"
+      copy_ratio: 1.0      # Коэффициент копирования
+      max_delay_ms: 1000   # Максимальная задержка
+      
+  # Фильтры копирования
+  filters:
+    min_position_usdt: 10
+    max_position_usdt: 5000
+    copy_stop_loss: true
+    copy_take_profit: false

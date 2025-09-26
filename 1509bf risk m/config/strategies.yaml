@@ -1,0 +1,422 @@
+# Конфигурация торговых стратегий
+# Параметры индикаторов и алгоритмов торговли
+
+# ===========================================
+# АКТИВНЫЕ СТРАТЕГИИ
+# ===========================================
+active_strategies:
+  # Основная стратегия
+  primary: "vortex_bands"
+  
+  # Дополнительные стратегии (будущие)
+  secondary: []
+  
+  # Режим работы
+  mode: "signals"  # auto, signals, paper_trading
+
+# ===========================================
+# VORTEX BANDS СТРАТЕГИЯ
+# ===========================================
+vortex_bands:
+  # Основные параметры
+  name: "Vortex Bands Reversal Strategy"
+  description: "Реверсивная стратегия на основе индикатора Vortex Bands"
+  enabled: true
+  version: "2.1.0"
+  
+  # Таймфреймы
+  timeframes:
+    primary: "240"  # 4H основной таймфрейм
+    secondary: []   # Дополнительные таймфреймы (пока не используются)
+    
+  # Торгуемые инструменты с индивидуальными параметрами
+  instruments:
+    BTCUSDT:
+      enabled: true
+      length: 7
+      multiplier: 1.0
+      alert_distance_2: 2.5  # Предупреждающий алерт
+      alert_distance_1: 1.5  # Основной сигнал входа
+      flag_reset_distance: 2.5
+      min_bars_required: 20
+      
+    ETHUSDT:
+      enabled: true
+      length: 9
+      multiplier: 1.0
+      alert_distance_2: 2.5
+      alert_distance_1: 1.5
+      flag_reset_distance: 2.5
+      min_bars_required: 20
+      
+    SOLUSDT:
+      enabled: true
+      length: 7
+      multiplier: 1.0
+      alert_distance_2: 2.5
+      alert_distance_1: 1.5
+      flag_reset_distance: 2.5
+      min_bars_required: 20
+      
+    AVAXUSDT:
+      enabled: true
+      length: 18  # Специально оптимизированное значение для AVAX
+      multiplier: 1.0
+      alert_distance_2: 2.5
+      alert_distance_1: 1.5
+      flag_reset_distance: 2.5
+      min_bars_required: 20
+      
+  # Дефолтные параметры для новых инструментов
+  default_parameters:
+    length: 20
+    multiplier: 2.0
+    alert_distance_2: 2.5
+    alert_distance_1: 1.5
+    flag_reset_distance: 2.5
+    min_bars_required: 20
+    
+  # Источник данных для расчетов
+  data_source:
+    price_source: "hlc3"  # hlc3, close, ohlc4
+    volume_filter: false
+    min_volume_24h: 1000000  # Минимальный объем в USDT
+    
+  # Фильтры сигналов
+  signal_filters:
+    # Фильтр тренда
+    trend_filter:
+      enabled: false
+      method: "ema"  # ema, sma, none
+      period: 200
+      
+    # Фильтр волатильности
+    volatility_filter:
+      enabled: false
+      atr_period: 14
+      min_atr_ratio: 0.002
+      max_atr_ratio: 0.06
+      
+    # Фильтр времени торговли
+    time_filter:
+      enabled: false
+      trading_hours:
+        start: "00:00"
+        end: "23:59"
+      timezone: "UTC"
+      exclude_weekends: false
+      
+  # Логика торговли
+  trading_logic:
+    # Тип стратегии
+    strategy_type: "reversal"  # reversal, trend_following
+    
+    # Реверсивная логика
+    reversal:
+      # Автоматическое закрытие противоположных позиций
+      auto_close_opposite: true
+      
+      # Система алертов
+      two_level_alerts: true
+      
+      # Backup сигналы при пересечениях полос
+      backup_signals: true
+      
+      # Сброс флагов при изменении условий
+      smart_flag_reset: true
+      
+    # Управление позициями
+    position_management:
+      # Максимальное количество позиций
+      max_positions: 10
+      
+      # Максимальное время в позиции (минуты, 0 = без ограничений)
+      max_position_time: 0
+      
+      # Разрешить хеджирование
+      allow_hedging: false
+      
+  # Система Stop Loss и Take Profit
+  stop_loss_take_profit:
+    # Отключено для реверсивной стратегии
+    enabled: false
+    
+    # Настройки (для будущего использования)
+    stop_loss:
+      method: "none"  # atr, percentage, fixed, none
+      atr_multiplier: 2.0
+      percentage: 5.0
+      fixed_distance: 100.0
+      
+    take_profit:
+      method: "none"  # atr, percentage, fixed, rr_ratio, none
+      atr_multiplier: 4.0
+      percentage: 10.0
+      fixed_distance: 200.0
+      risk_reward_ratio: 2.0
+      
+    # Трейлинг стоп
+    trailing_stop:
+      enabled: false
+      trigger_percentage: 2.0
+      trail_distance: 1.0
+
+# ===========================================
+# УПРАВЛЕНИЕ РИСКАМИ
+# ===========================================
+risk_management:
+  # Общие настройки рисков
+  global:
+    # Максимальная просадка портфеля (%)
+    max_drawdown_percent: 20.0
+    
+    # Максимальные потери за день (USDT)
+    daily_loss_limit: 500.0
+    
+    # Максимальные потери за неделю (USDT)
+    weekly_loss_limit: 2000.0
+    
+    # Максимальные потери за месяц (USDT)
+    monthly_loss_limit: 5000.0
+    
+  # Управление размером позиций
+  position_sizing:
+    # Метод расчета размера
+    method: "fixed_percent"  # fixed_amount, fixed_percent, adaptive, kelly
+    
+    # Фиксированная сумма в USDT
+    fixed_amount: 100.0
+    
+    # Процент от баланса
+    fixed_percent: 5.0  # 5% от баланса на позицию
+    
+    # Минимальная сумма позиции
+    min_position_size: 10.0
+    
+    # Максимальная сумма позиции
+    max_position_size: 10000.0
+    
+  # Адаптивное управление
+  adaptive_sizing:
+    enabled: false
+    
+    # Анализ последних сделок
+    lookback_trades: 20
+    
+    # Коэффициенты корректировки
+    win_multiplier: 1.1  # Увеличение после прибыльной сделки
+    loss_multiplier: 0.9  # Уменьшение после убыточной сделки
+    
+    # Лимиты корректировки
+    max_multiplier: 2.0
+    min_multiplier: 0.5
+    
+  # Защита от переторговки
+  overtrading_protection:
+    enabled: true
+    
+    # Максимум сделок в день
+    max_trades_per_day: 20
+    
+    # Максимум сделок в час
+    max_trades_per_hour: 5
+    
+    # Минимальный интервал между сделками (минуты)
+    min_trade_interval: 30
+    
+  # Корреляционный анализ
+  correlation_limits:
+    enabled: false
+    
+    # Максимальная корреляция между позициями
+    max_correlation: 0.7
+    
+    # Максимальная экспозиция в одном секторе (%)
+    max_sector_exposure: 50.0
+
+# ===========================================
+# НАСТРОЙКИ МАРЖИ И ПЛЕЧА
+# ===========================================
+margin_settings:
+  # Режим маржи по умолчанию
+  default_margin_mode: "CROSS"  # CROSS, ISOLATED
+  
+  # Плечо по инструментам
+  leverage:
+    BTCUSDT: 10
+    ETHUSDT: 10
+    SOLUSDT: 10
+    AVAXUSDT: 10
+    
+    # Дефолтное плечо для новых инструментов
+    default: 10
+    
+    # Максимальное плечо
+    max_leverage: 100
+    
+  # Управление маржей
+  margin_management:
+    # Автоматическая настройка плеча
+    auto_adjust_leverage: true
+    
+    # Буфер ликвидации (% от цены ликвидации)
+    liquidation_buffer: 20.0
+    
+    # Максимальное использование маржи (%)
+    max_margin_usage: 80.0
+    
+    # Экстренное закрытие при критической марже
+    emergency_close_enabled: true
+    emergency_margin_threshold: 95.0
+
+# ===========================================
+# СИГНАЛЫ И УВЕДОМЛЕНИЯ
+# ===========================================
+signals:
+  # Типы сигналов
+  types:
+    entry_signals: true      # Сигналы входа
+    exit_signals: true       # Сигналы выхода
+    warning_signals: true    # Предупреждающие сигналы
+    
+  # Каналы уведомлений
+  notifications:
+    telegram: true
+    email: false
+    webhook: false
+    database: true
+    
+  # Фильтрация сигналов
+  filtering:
+    # Минимальный интервал между сигналами (минуты)
+    min_signal_interval: 15
+    
+    # Дедупликация одинаковых сигналов
+    deduplicate_signals: true
+    
+    # Максимальное количество сигналов в час
+    max_signals_per_hour: 10
+
+# ===========================================
+# БЭКТЕСТИНГ И ОПТИМИЗАЦИЯ
+# ===========================================
+backtesting:
+  # Параметры бэктестинга
+  settings:
+    # Начальный капитал
+    initial_capital: 10000.0
+    
+    # Комиссии
+    commission:
+      maker: 0.0002
+      taker: 0.0006
+      
+    # Проскальзывание
+    slippage:
+      market_orders: 0.001  # 0.1%
+      limit_orders: 0.0
+      
+  # Диапазоны оптимизации параметров
+  optimization:
+    vortex_length:
+      min: 5
+      max: 50
+      step: 1
+      
+    vortex_multiplier:
+      min: 0.5
+      max: 5.0
+      step: 0.1
+      
+    alert_distance_1:
+      min: 0.5
+      max: 5.0
+      step: 0.1
+      
+    alert_distance_2:
+      min: 1.0
+      max: 10.0
+      step: 0.1
+
+# ===========================================
+# A/B ТЕСТИРОВАНИЕ
+# ===========================================
+ab_testing:
+  enabled: false
+  
+  # Конфигурации для тестирования
+  experiments:
+    # Эксперимент 1: Разные параметры длины
+    length_test:
+      enabled: false
+      allocation: 50  # 50% трафика
+      variants:
+        variant_a:
+          length: 14
+          multiplier: 1.5
+        variant_b:
+          length: 21
+          multiplier: 2.0
+          
+    # Эксперимент 2: Разные alert distances
+    alert_test:
+      enabled: false
+      allocation: 30
+      variants:
+        variant_a:
+          alert_distance_1: 1.0
+          alert_distance_2: 2.0
+        variant_b:
+          alert_distance_1: 2.0
+          alert_distance_2: 3.0
+
+# ===========================================
+# МОНИТОРИНГ ПРОИЗВОДИТЕЛЬНОСТИ
+# ===========================================
+performance_monitoring:
+  # Метрики для отслеживания
+  metrics:
+    # Основные метрики
+    total_return: true
+    sharpe_ratio: true
+    max_drawdown: true
+    win_rate: true
+    profit_factor: true
+    
+    # Дополнительные метрики
+    sortino_ratio: true
+    calmar_ratio: true
+    average_trade_duration: true
+    trades_per_day: true
+    
+  # Периоды анализа
+  analysis_periods:
+    - "1d"   # Дневной анализ
+    - "1w"   # Недельный анализ
+    - "1m"   # Месячный анализ
+    - "3m"   # Квартальный анализ
+    
+  # Бенчмарки для сравнения
+  benchmarks:
+    - "BTCUSDT"  # Сравнение с BTC
+    - "ETHUSDT"  # Сравнение с ETH
+    # - "SPY"    # Сравнение с S&P 500 (будущее)
+    
+  # Алерты производительности
+  alerts:
+    # Алерт при низкой производительности
+    low_performance:
+      enabled: true
+      threshold: -5.0  # Потери больше 5%
+      period: "1w"
+      
+    # Алерт при высокой просадке
+    high_drawdown:
+      enabled: true
+      threshold: 10.0  # Просадка больше 10%
+      
+    # Алерт при низком винрейте
+    low_winrate:
+      enabled: true
+      threshold: 30.0  # Винрейт меньше 30%
+      min_trades: 10   # Минимум сделок для анализа
