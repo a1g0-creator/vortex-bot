@@ -148,6 +148,11 @@ class RiskConfig:
         self.logger.info("Перезагрузка конфигурации из файла...")
         self._config = self._load()
 
+    def snapshot(self) -> Dict[str, Any]:
+        """Возвращает копию текущей конфигурации."""
+        import copy
+        return copy.deepcopy(self._config)
+
 # --- Структуры данных ---
 
 @dataclass
@@ -498,12 +503,50 @@ class RiskManager:
         """Включает риск-менеджмент."""
         await self.set_risk_parameter("enabled", True)
         self.logger.info("Риск-менеджмент ВКЛЮЧЕН.")
+        return True
 
     async def disable(self):
         """Выключает риск-менеджмент."""
         await self.set_risk_parameter("enabled", False)
         self.logger.info("Риск-менеджмент ВЫКЛЮЧЕН.")
+        return True
 
+    async def reset_counters(self, manual: bool = True) -> bool:
+        """Сбрасывает все счетчики (дневные и недельные)."""
+        self.logger.info("Сброс всех счетчиков...")
+        await self.reset_daily_counters(manual=manual)
+        await self.reset_weekly_counters(manual=manual)
+        return True
+
+    async def get_status(self) -> Dict[str, Any]:
+        """Возвращает краткий статус для команды /risk."""
+        async with self.lock:
+            return {
+                "enabled": self.config.get("enabled", False),
+                "daily": {
+                    "used_trades": self.metrics.daily_trades_count,
+                    "max_trades": self.config.get("daily.max_trades"),
+                    "realized_loss": self.metrics.daily_pnl,
+                    "max_abs_loss": self.config.get("daily.max_abs_loss"),
+                },
+                "weekly": {
+                    "realized_loss": self.metrics.weekly_pnl,
+                    "max_abs_loss": self.config.get("weekly.max_abs_loss"),
+                }
+            }
+
+    async def show_limits(self) -> Dict[str, Any]:
+        """Возвращает основные группы лимитов для /risk_show."""
+        async with self.lock:
+            # Используем публичный метод snapshot для получения копии конфига
+            return self.config.snapshot()
+
+    async def set_limit(self, scope: str, key: str, value: Any) -> bool:
+        """Безопасно устанавливает параметр, делегируя в set_risk_parameter."""
+        path = f"{scope}.{key}"
+        # set_risk_parameter уже содержит логику валидации и сохранения
+        success, _ = await self.set_risk_parameter(path, value)
+        return success
 
 # --- Синглтон для глобального доступа ---
 

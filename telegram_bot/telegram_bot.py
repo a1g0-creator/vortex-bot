@@ -154,6 +154,7 @@ class TelegramBot:
                 BotCommand("mode", "⚙️ Режим работы"),
                 BotCommand("risk", "🛡️ Статус рисков"),
                 BotCommand("risk_show", "📋 Детальные лимиты"),
+                BotCommand("risk_set", "🔧 Изменить лимит"),
                 BotCommand("risk_enable", "✅ Включить риски"),
                 BotCommand("risk_disable", "⛔ Выключить риски"),
                 BotCommand("risk_reset", "🔄 Сброс счетчиков"),
@@ -180,6 +181,7 @@ class TelegramBot:
             # Команды риск-менеджмента
             self.application.add_handler(CommandHandler("risk", self._cmd_risk))
             self.application.add_handler(CommandHandler("risk_show", self._cmd_risk_show))
+            self.application.add_handler(CommandHandler("risk_set", self._cmd_risk_set))
             self.application.add_handler(CommandHandler("risk_enable", self._cmd_risk_enable))
             self.application.add_handler(CommandHandler("risk_disable", self._cmd_risk_disable))
             self.application.add_handler(CommandHandler("risk_reset", self._cmd_risk_reset))
@@ -189,7 +191,7 @@ class TelegramBot:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_button_click)
             )
 
-            self.logger.info("✅ Зарегистрировано 11 команд и 1 обработчик кнопок")
+            self.logger.info("✅ Зарегистрировано 12 команд и 1 обработчик кнопок")
         except Exception as e:
             self.logger.error(f"Ошибка регистрации обработчиков: {e}")
 
@@ -556,232 +558,230 @@ class TelegramBot:
 
     # ===== КОМАНДЫ РИСК-МЕНЕДЖМЕНТА =====
 
-    def _get_risk_manager_adapter(self):
-        """Безопасный адаптер для доступа к риск-менеджеру"""
-        try:
-            if not hasattr(self.trading_bot, 'risk_manager') or not self.trading_bot.risk_manager:
-                return None
-            return self.trading_bot.risk_manager
-        except Exception:
-            return None
+    def _fmt(self, value: Any) -> str:
+        """Форматирует значение в `backticks` для Markdown."""
+        if isinstance(value, bool):
+            return f"`{str(value).lower()}`"
+        if isinstance(value, str) and (value.upper() in ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"]):
+            return f"`{value.upper()}`"
+        return f"`{value}`"
 
     async def _cmd_risk(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Команда /risk - краткий статус рисков"""
+        """Команда /risk - краткий статус рисков."""
         try:
-            rm = self._get_risk_manager_adapter()
+            rm = self.trading_bot.risk_manager
             if not rm:
-                await update.message.reply_text("⚠️ Риск-менеджер недоступен")
+                await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
                 return
+
+            status = await rm.get_status()
             
-            # Безопасно проверяем enabled
-            try:
-                enabled = getattr(rm, 'enabled', None)
-                if enabled is None:
-                    # Пытаемся вызвать функциональный API
-                    if hasattr(rm, 'get_risk_enabled'):
-                        enabled = await rm.get_risk_enabled()
-                    else:
-                        enabled = "неизвестно"
-            except Exception:
-                enabled = "неизвестно"
+            enabled_str = "включен" if status.get('enabled', False) else "выключен"
+            enabled_emoji = "✅" if status.get('enabled', False) else "⛔"
             
-            status_emoji = "✅" if enabled is True else "⛔" if enabled is False else "❓"
-            status_text = "включен" if enabled is True else "выключен" if enabled is False else str(enabled)
+            message = [f"🛡️ *Risk Manager*: {enabled_emoji} {enabled_str}"]
+
+            daily = status.get('daily', {})
+            daily_loss = daily.get('realized_loss', 0)
+            daily_max_loss = daily.get('max_abs_loss', '??')
+            daily_trades = daily.get('used_trades', 0)
+            daily_max_trades = daily.get('max_trades', '??')
             
-            message = (
-                f"🛡️ *СТАТУС РИСК-МЕНЕДЖМЕНТА*\n\n"
-                f"Состояние: {status_emoji} {status_text}\n\n"
-                "Для детальной информации: /risk_show\n"
-                "Управление: /risk_enable | /risk_disable"
+            message.append(
+                f"├─ *Daily*: trades {self._fmt(f'{daily_trades}/{daily_max_trades}')}, "
+                f"loss {self._fmt(f'{daily_loss:.2f}')} / {self._fmt(daily_max_loss)}"
             )
+
+            weekly = status.get('weekly', {})
+            weekly_loss = weekly.get('realized_loss', 0)
+            weekly_max_loss = weekly.get('max_abs_loss', '??')
             
-            await update.message.reply_text(message, parse_mode='Markdown')
-            
+            message.append(
+                f"└─ *Weekly*: loss {self._fmt(f'{weekly_loss:.2f}')} / {self._fmt(weekly_max_loss)}"
+            )
+
+            await update.message.reply_text("\n".join(message), parse_mode='Markdown')
+
         except Exception as e:
-            self.logger.error(f"Ошибка команды /risk: {e}")
-            await update.message.reply_text(f"❌ Ошибка: {e}")
+            self.logger.error(f"Ошибка команды /risk: {e}\n{traceback.format_exc()}")
+            await update.message.reply_text(f"❌ Ошибка получения статуса рисков: {e}")
 
     async def _cmd_risk_show(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Команда /risk_show - детальные лимиты"""
+        """Команда /risk_show - детальные лимиты из risk.yaml."""
         try:
-            rm = self._get_risk_manager_adapter()
+            rm = self.trading_bot.risk_manager
             if not rm:
-                await update.message.reply_text("⚠️ Риск-менеджер недоступен")
+                await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
                 return
+
+            limits = await rm.show_limits()
+            if not limits:
+                await update.message.reply_text("⚠️ Не удалось загрузить лимиты рисков.")
+                return
+
+            message = ["🧩 *RISK LIMITS* (from risk.yaml)"]
             
-            # Пытаемся получить статус через различные методы
-            status_info = None
-            try:
-                if hasattr(rm, 'get_risk_status'):
-                    status_info = await rm.get_risk_status()
-                elif hasattr(rm, 'get_current_status'):
-                    status_info = await rm.get_current_status()
-            except Exception as e:
-                self.logger.warning(f"Не удалось получить детальный статус: {e}")
+            message.append(
+                f"enabled: {self._fmt(limits.get('enabled'))}, "
+                f"currency: {self._fmt(limits.get('currency'))}, "
+                f"persist: {self._fmt(limits.get('persist_runtime_updates'))}"
+            )
+
+            def format_section(title: str, data: Dict[str, Any]):
+                parts = [f"*{title}*:"]
+                for key, value in data.items():
+                    if isinstance(value, dict):
+                        triggers_str = ", ".join([f"{k}={v}" for k, v in value.items()])
+                        parts.append(f"{key}={self._fmt('{' + triggers_str + '}')}")
+                    else:
+                        parts.append(f"{key}={self._fmt(value)}")
+                message.append(" ".join(parts))
+
+            sections = [
+                "daily", "weekly", "position", "circuit_breaker",
+                "overtrading_protection", "adaptive_risk", "monitoring"
+            ]
+
+            for section_name in sections:
+                section_data = limits.get(section_name)
+                if section_data:
+                    format_section(section_name, section_data)
             
-            if status_info and isinstance(status_info, dict) and 'error' not in status_info:
-                # Форматируем полученную информацию
-                message = "📋 *ДЕТАЛЬНЫЕ ЛИМИТЫ РИСКОВ*\n\n"
-                
-                # Общий статус
-                enabled = status_info.get('enabled', 'неизвестно')
-                message += f"Статус: {'✅ включен' if enabled else '⛔ выключен'}\n\n"
-                
-                # Дневные лимиты
-                daily = status_info.get('daily', {})
-                if daily:
-                    message += "*Дневные лимиты:*\n"
-                    if 'max_abs_loss' in daily:
-                        message += f"• Макс. убыток: {daily['max_abs_loss']} USDT\n"
-                    if 'max_trades' in daily:
-                        message += f"• Макс. сделок: {daily['max_trades']}\n"
-                    message += "\n"
-                
-                # Позиционные лимиты
-                position = status_info.get('position', {})
-                if position:
-                    message += "*Позиционные лимиты:*\n"
-                    if 'max_leverage' in position:
-                        message += f"• Макс. плечо: {position['max_leverage']}x\n"
-                    if 'max_concurrent_positions' in position:
-                        message += f"• Макс. позиций: {position['max_concurrent_positions']}\n"
-            else:
-                # Fallback - базовая информация
-                message = (
-                    "📋 *РИСК-МЕНЕДЖМЕНТ*\n\n"
-                    "Риск-менеджер активен, но детальная\n"
-                    "информация недоступна.\n\n"
-                    "Используйте /risk для базового статуса"
-                )
-            
-            await update.message.reply_text(message, parse_mode='Markdown')
-            
+            await update.message.reply_text("\n".join(message), parse_mode='Markdown')
+
         except Exception as e:
-            self.logger.error(f"Ошибка команды /risk_show: {e}")
-            await update.message.reply_text(f"❌ Ошибка: {e}")
+            self.logger.error(f"Ошибка команды /risk_show: {e}\n{traceback.format_exc()}")
+            await update.message.reply_text(f"❌ Ошибка получения детальных лимитов: {e}")
 
     async def _cmd_risk_enable(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Команда /risk_enable"""
+        """Команда /risk_enable. Только для администраторов."""
         try:
-            # Проверяем права админа
-            user_id = update.effective_user.id
-            if not await self._is_admin_user(user_id):
-                await update.message.reply_text("❌ У вас нет прав для управления риск-менеджментом")
+            if not await self._is_admin_user(update.effective_user.id):
+                await update.message.reply_text("⛔ Недостаточно прав.")
                 return
             
-            rm = self._get_risk_manager_adapter()
+            rm = self.trading_bot.risk_manager
             if not rm:
-                await update.message.reply_text("⚠️ Риск-менеджер недоступен")
+                await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
                 return
             
-            try:
-                # Пытаемся включить через различные методы
-                success = False
-                if hasattr(rm, 'enable'):
-                    success = await rm.enable()
-                elif hasattr(rm, 'set_risk_enabled'):
-                    success = await rm.set_risk_enabled(True)
-                elif hasattr(rm, 'enabled'):
-                    rm.enabled = True
-                    success = True
-                
-                if success:
-                    await update.message.reply_text("✅ Риск-менеджмент включен")
-                    self.logger.info("Риск-менеджмент включен через Telegram")
-                else:
-                    await update.message.reply_text("⚠️ Не удалось включить риск-менеджмент")
-                    
-            except Exception as e:
-                await update.message.reply_text(f"❌ Ошибка включения: {e}")
-                
+            if await rm.enable():
+                self.logger.info(f"Risk Manager enabled by admin {update.effective_user.id}")
+                await update.message.reply_text("✅ Риск-менеджмент *включен*.")
+            else:
+                await update.message.reply_text("⚠️ Не удалось включить риск-менеджмент.")
+
         except Exception as e:
             self.logger.error(f"Ошибка команды /risk_enable: {e}")
             await update.message.reply_text(f"❌ Ошибка: {e}")
 
     async def _cmd_risk_disable(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Команда /risk_disable"""
+        """Команда /risk_disable. Только для администраторов."""
         try:
-            # Проверяем права админа
-            user_id = update.effective_user.id
-            if not await self._is_admin_user(user_id):
-                await update.message.reply_text("❌ У вас нет прав для управления риск-менеджментом")
+            if not await self._is_admin_user(update.effective_user.id):
+                await update.message.reply_text("⛔ Недостаточно прав.")
                 return
             
-            rm = self._get_risk_manager_adapter()
+            rm = self.trading_bot.risk_manager
             if not rm:
-                await update.message.reply_text("⚠️ Риск-менеджер недоступен")
+                await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
                 return
-            
-            try:
-                # Пытаемся выключить через различные методы
-                success = False
-                if hasattr(rm, 'disable'):
-                    success = await rm.disable()
-                elif hasattr(rm, 'set_risk_enabled'):
-                    success = await rm.set_risk_enabled(False)
-                elif hasattr(rm, 'enabled'):
-                    rm.enabled = False
-                    success = True
-                
-                if success:
-                    await update.message.reply_text("⛔ Риск-менеджмент выключен")
-                    self.logger.info("Риск-менеджмент выключен через Telegram")
-                else:
-                    await update.message.reply_text("⚠️ Не удалось выключить риск-менеджмент")
-                    
-            except Exception as e:
-                await update.message.reply_text(f"❌ Ошибка выключения: {e}")
-                
+
+            if await rm.disable():
+                self.logger.info(f"Risk Manager disabled by admin {update.effective_user.id}")
+                await update.message.reply_text("⛔ Риск-менеджмент *выключен*.")
+            else:
+                await update.message.reply_text("⚠️ Не удалось выключить риск-менеджмент.")
+
         except Exception as e:
             self.logger.error(f"Ошибка команды /risk_disable: {e}")
             await update.message.reply_text(f"❌ Ошибка: {e}")
 
     async def _cmd_risk_reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Команда /risk_reset"""
+        """Команда /risk_reset. Сбрасывает счетчики. Только для администраторов."""
         try:
-            # Проверяем права админа
-            user_id = update.effective_user.id
-            if not await self._is_admin_user(user_id):
-                await update.message.reply_text("❌ У вас нет прав для управления риск-менеджментом")
+            if not await self._is_admin_user(update.effective_user.id):
+                await update.message.reply_text("⛔ Недостаточно прав.")
                 return
-            
-            rm = self._get_risk_manager_adapter()
+
+            rm = self.trading_bot.risk_manager
             if not rm:
-                await update.message.reply_text("⚠️ Риск-менеджер недоступен")
+                await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
                 return
-            
-            args = context.args
-            reset_type = args[0].lower() if args else "daily"
+
+            arg = context.args[0].lower() if context.args else "all"
             
             success = False
-            if reset_type == "daily":
-                if hasattr(rm, 'reset_daily_counters'):
-                    success = await rm.reset_daily_counters()
-                message = "📊 Дневные счетчики сброшены" if success else "❌ Не удалось сбросить дневные счетчики"
-            elif reset_type == "weekly":
-                if hasattr(rm, 'reset_weekly_counters'):
-                    success = await rm.reset_weekly_counters()
-                message = "📊 Недельные счетчики сброшены" if success else "❌ Не удалось сбросить недельные счетчики"
-            elif reset_type == "all":
-                daily_ok = False
-                weekly_ok = False
-                if hasattr(rm, 'reset_daily_counters'):
-                    daily_ok = await rm.reset_daily_counters()
-                if hasattr(rm, 'reset_weekly_counters'):
-                    weekly_ok = await rm.reset_weekly_counters()
-                success = daily_ok or weekly_ok
-                message = "📊 Все счетчики сброшены" if success else "❌ Не удалось сбросить счетчики"
+            if arg == "daily":
+                success = await rm.reset_daily_counters(manual=True)
+                message = "✅ Дневные счетчики сброшены."
+            elif arg == "weekly":
+                success = await rm.reset_weekly_counters(manual=True)
+                message = "✅ Недельные счетчики сброшены."
+            elif arg == "all":
+                success = await rm.reset_counters(manual=True)
+                message = "✅ Все счетчики (daily, weekly) сброшены."
             else:
-                message = "❓ Неверный тип сброса. Используйте: daily, weekly или all"
-            
+                message = "⚠️ Неверный аргумент. Используйте `daily`, `weekly` или `all`."
+
             if success:
-                self.logger.info(f"Сброшены счетчики риск-менеджера: {reset_type}")
-            
+                self.logger.info(f"Risk counters reset for '{arg}' by admin {update.effective_user.id}")
+            else:
+                message = f"❌ Не удалось сбросить счетчики ({arg})."
+
             await update.message.reply_text(message)
-            
+
         except Exception as e:
             self.logger.error(f"Ошибка команды /risk_reset: {e}")
-            await update.message.reply_text(f"❌ Ошибка: {e}")
+            await update.message.reply_text(f"❌ Ошибка сброса счетчиков: {e}")
+
+    async def _cmd_risk_set(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Команда /risk_set <scope> <key> <value>.
+        Изменяет параметр риска. Только для администраторов.
+        """
+        try:
+            if not await self._is_admin_user(update.effective_user.id):
+                await update.message.reply_text("⛔ Недостаточно прав.")
+                return
+
+            rm = self.trading_bot.risk_manager
+            if not rm:
+                await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
+                return
+
+            args = context.args
+            if len(args) < 3:
+                await update.message.reply_text(
+                    "⚠️ Неверный формат.\nИспользуйте: `/risk_set <scope> <key> <value>`\n"
+                    "Пример: `/risk_set daily max_abs_loss 750`",
+                    parse_mode='Markdown'
+                )
+                return
+
+            scope, key, value_str = args[0], args[1], " ".join(args[2:])
+
+            value: Any
+            if value_str.lower() in ['true', 'on', 'yes', '1']: value = True
+            elif value_str.lower() in ['false', 'off', 'no', '0']: value = False
+            else:
+                try:
+                    value = float(value_str) if '.' in value_str else int(value_str)
+                except ValueError:
+                    value = value_str
+
+            if await rm.set_limit(scope, key, value):
+                response = f"✅ Обновлено: {scope}.{key} = {self._fmt(value)}"
+                self.logger.info(f"Risk limit '{scope}.{key}' set to '{value}' by admin {update.effective_user.id}")
+            else:
+                response = f"⚠️ Ошибка установки {scope}.{key}. Проверьте путь и тип значения."
+                self.logger.warning(f"Failed to set limit '{scope}.{key}' to '{value}'")
+
+            await update.message.reply_text(response)
+
+        except Exception as e:
+            self.logger.error(f"Критическая ошибка в /risk_set: {e}\n{traceback.format_exc()}")
+            await update.message.reply_text(f"❌ Критическая ошибка: {e}")
 
     async def _cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда /help"""
@@ -796,9 +796,10 @@ class TelegramBot:
             "*Управление рисками:*\n"
             "🛡️ `/risk` - Краткий статус рисков\n"
             "📋 `/risk_show` - Детальные лимиты\n"
+            "🔧 `/risk_set <scope> <key> <value>` - Изменить лимит\n"
             "✅ `/risk_enable` - Включить риски\n"
             "⛔ `/risk_disable` - Выключить риски\n"
-            "🔄 `/risk_reset daily|weekly|all` - Сброс счетчиков\n\n"
+            "🔄 `/risk_reset [daily|weekly|all]` - Сброс счетчиков\n\n"
             
             "📘 Используйте кнопки ниже для быстрого доступа к основным действиям."
         )
