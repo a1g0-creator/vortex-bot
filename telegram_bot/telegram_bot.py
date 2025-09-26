@@ -665,11 +665,9 @@ class TelegramBot:
                 await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
                 return
             
-            if await rm.enable():
-                self.logger.info(f"Risk Manager enabled by admin {update.effective_user.id}")
-                await update.message.reply_text("✅ Риск-менеджмент *включен*.")
-            else:
-                await update.message.reply_text("⚠️ Не удалось включить риск-менеджмент.")
+            await rm.enable()
+            self.logger.info(f"Risk Manager enabled by admin {update.effective_user.id}")
+            await update.message.reply_text("✅ Риск-менеджмент *включен*.", parse_mode='Markdown')
 
         except Exception as e:
             self.logger.error(f"Ошибка команды /risk_enable: {e}")
@@ -687,11 +685,9 @@ class TelegramBot:
                 await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
                 return
 
-            if await rm.disable():
-                self.logger.info(f"Risk Manager disabled by admin {update.effective_user.id}")
-                await update.message.reply_text("⛔ Риск-менеджмент *выключен*.")
-            else:
-                await update.message.reply_text("⚠️ Не удалось выключить риск-менеджмент.")
+            await rm.disable()
+            self.logger.info(f"Risk Manager disabled by admin {update.effective_user.id}")
+            await update.message.reply_text("⛔ Риск-менеджмент *выключен*.", parse_mode='Markdown')
 
         except Exception as e:
             self.logger.error(f"Ошибка команды /risk_disable: {e}")
@@ -711,24 +707,19 @@ class TelegramBot:
 
             arg = context.args[0].lower() if context.args else "all"
             
-            success = False
             if arg == "daily":
-                success = await rm.reset_daily_counters(manual=True)
+                await rm.reset_daily_counters(manual=True)
                 message = "✅ Дневные счетчики сброшены."
             elif arg == "weekly":
-                success = await rm.reset_weekly_counters(manual=True)
+                await rm.reset_weekly_counters(manual=True)
                 message = "✅ Недельные счетчики сброшены."
             elif arg == "all":
-                success = await rm.reset_counters(manual=True)
+                await rm.reset_counters(manual=True)
                 message = "✅ Все счетчики (daily, weekly) сброшены."
             else:
                 message = "⚠️ Неверный аргумент. Используйте `daily`, `weekly` или `all`."
 
-            if success:
-                self.logger.info(f"Risk counters reset for '{arg}' by admin {update.effective_user.id}")
-            else:
-                message = f"❌ Не удалось сбросить счетчики ({arg})."
-
+            self.logger.info(f"Risk counters reset for '{arg}' by admin {update.effective_user.id}")
             await update.message.reply_text(message)
 
         except Exception as e:

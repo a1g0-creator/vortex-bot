@@ -12,7 +12,6 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from collections import deque
 
 # Абстракция для type hinting, чтобы избежать циклического импорта
 try:
@@ -71,77 +70,72 @@ class RiskConfig:
         self._config = self._load()
 
     def _load(self) -> Dict[str, Any]:
-        """Загружает конфигурацию из YAML файла, используя дефолты при отсутствии."""
+        """Загружает конфигурацию из YAML файла. Fail-fast."""
         if not self.config_path.exists():
-            self.logger.warning(f"Конфигурационный файл не найден: {self.config_path}. Используются значения по умолчанию.")
-            return self._DEFAULT_CONFIG.copy()
-
-        try:
-            with open(self.config_path, 'r', encoding='utf-8') as f:
-                loaded_config = yaml.safe_load(f)
-                if not loaded_config:
-                    self.logger.warning(f"Файл конфигурации пуст: {self.config_path}. Используются значения по умолчанию.")
-                    return self._DEFAULT_CONFIG.copy()
-                # Здесь можно добавить логику слияния с дефолтами, если нужно
-                return loaded_config
-        except Exception as e:
-            self.logger.error(f"Ошибка загрузки конфигурации из {self.config_path}: {e}. Используются значения по умолчанию.")
-            return self._DEFAULT_CONFIG.copy()
+            raise FileNotFoundError(f"risk.yaml not found at {self.config_path}")
+        with open(self.config_path, 'r', encoding='utf-8') as f:
+            data = yaml.safe_load(f)
+        if not isinstance(data, dict):
+            raise ValueError("risk.yaml must be a top-level mapping")
+        return data
 
     def get(self, key_path: str, default: Any = None) -> Any:
         """
-        Получает значение из конфигурации по 'dotted' пути (e.g., 'daily.max_abs_loss').
+        Получает значение из конфигурации по 'dotted' пути.
+        При ошибке возвращает default или кидает исключение.
         """
         keys = key_path.split('.')
         value = self._config
         try:
-            for key in keys:
-                value = value[key]
+            for k in keys:
+                value = value[k]
             return value
-        except (KeyError, TypeError):
-            # Попробуем найти в дефолтной конфигурации
-            default_value = self._DEFAULT_CONFIG
-            try:
-                for key in keys:
-                    default_value = default_value[key]
-                return default_value
-            except (KeyError, TypeError):
-                self.logger.warning(f"Параметр '{key_path}' не найден ни в risk.yaml, ни в дефолтной конфигурации.")
+        except Exception:
+            self.logger.error(f"Config key not found: {key_path}")
+            if default is not None:
                 return default
+            raise
 
     def set(self, key_path: str, value: Any) -> bool:
         """
-        Устанавливает значение по 'dotted' пути и сохраняет конфигурацию, если разрешено.
+        Устанавливает значение по 'dotted' пути, если он существует.
         """
         keys = key_path.split('.')
-        config_part = self._config
+        cur = self._config
         try:
-            for key in keys[:-1]:
-                if key not in config_part:
-                    config_part[key] = {}
-                config_part = config_part[key]
-
-            config_part[keys[-1]] = value
-            self.logger.info(f"Параметр '{key_path}' обновлен на значение: {value}")
+            for k in keys[:-1]:
+                cur = cur[k]  # KeyError если путь неверный
+            if keys[-1] not in cur:
+                raise KeyError(f"Unknown config key: {key_path}")
+            cur[keys[-1]] = value
+            self.logger.info(f"Config '{key_path}' = {value}")
             self.save()
             return True
         except Exception as e:
-            self.logger.error(f"Не удалось установить параметр '{key_path}': {e}")
+            self.logger.error(f"Set failed for '{key_path}': {e}")
             return False
 
     def save(self):
-        """Сохраняет текущую конфигурацию в файл risk.yaml, если разрешено."""
+        """Сохраняет конфигурацию атомарно (через временный файл)."""
         if not self.get("persist_runtime_updates", True):
-            self.logger.info("Сохранение изменений в файл отключено в конфигурации.")
+            self.logger.info("Persist disabled; skipping save()")
             return
-
+        tmp_path = self.config_path.with_suffix(".tmp")
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.config_path, 'w', encoding='utf-8') as f:
-                yaml.dump(self._config, f, default_flow_style=False, indent=2, allow_unicode=True, sort_keys=False)
-            self.logger.info(f"Конфигурация успешно сохранена в {self.config_path}")
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                yaml.safe_dump(self._config, f, default_flow_style=False, indent=2, allow_unicode=True, sort_keys=False)
+            import os
+            os.replace(tmp_path, self.config_path)
+            self.logger.info(f"Config saved to {self.config_path}")
         except Exception as e:
-            self.logger.error(f"Ошибка сохранения конфигурации в {self.config_path}: {e}")
+            self.logger.error(f"Atomic save failed: {e}")
+        finally:
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     def reload(self):
         """Перезагружает конфигурацию из файла."""
@@ -274,28 +268,42 @@ class RiskManager:
 
             return True, "OK"
 
-    async def update_after_trade(self, pnl: float):
-        """Обновляет метрики после закрытия сделки."""
+    async def update_after_trade(
+        self,
+        pnl: Optional[float] = None,
+        *,
+        realized_pnl: Optional[float] = None,
+        is_open: bool = False,
+        is_close: bool = True
+    ):
+        """
+        Совместимый метод: поддерживает старые вызовы (realized_pnl/is_open/is_close)
+        и новый — с единственным параметром pnl.
+        """
+        # Нормализуем вход
+        if pnl is None:
+            pnl = realized_pnl if realized_pnl is not None else 0.0
+
         async with self.lock:
             if not self.initialized:
                 self.logger.warning("Попытка обновить метрики на неинициализированном RiskManager.")
                 return
 
-            self.metrics.daily_trades_count += 1
-            self.metrics.weekly_trades_count += 1
-            self.metrics.daily_pnl += pnl
-            self.metrics.weekly_pnl += pnl
-            
-            # Обновляем текущий баланс и высшую отметку
-            self.metrics.daily_current_balance += pnl
-            self.metrics.weekly_current_balance += pnl
+            if is_open:
+                self.metrics.daily_trades_count += 1
+                self.metrics.weekly_trades_count += 1
+
+            self.metrics.daily_pnl += float(pnl)
+            self.metrics.weekly_pnl += float(pnl)
+
+            self.metrics.daily_current_balance += float(pnl)
+            self.metrics.weekly_current_balance += float(pnl)
             self.metrics.daily_high_water_mark = max(self.metrics.daily_high_water_mark, self.metrics.daily_current_balance)
             self.metrics.weekly_high_water_mark = max(self.metrics.weekly_high_water_mark, self.metrics.weekly_current_balance)
 
-            # Обновляем количество открытых позиций
             try:
                 positions = await self.exchange.get_positions()
-                self.metrics.current_positions = len([p for p in positions if p.size > 0])
+                self.metrics.current_positions = len([p for p in positions if getattr(p, "size", 0) or getattr(p, "qty", 0)])
             except Exception as e:
                 self.logger.error(f"Не удалось обновить количество позиций: {e}")
 
@@ -364,6 +372,18 @@ class RiskManager:
             if risk_pct > max_risk_pct:
                 return False, f"Риск на позицию превышен: {risk_pct:.2f}% / {max_risk_pct}%"
 
+        # 3a. Минимальный размер позиции (USDT)
+        min_pos = self.config.get("position.min_position_size")
+        if position_value < float(min_pos):
+            return False, f"Размер позиции ниже минимума: {position_value:.2f} < {min_pos:.2f}"
+
+        # 3b. Максимальный размер позиции (% от капитала)
+        max_pos_pct = self.config.get("position.max_position_size_pct")
+        if current_balance > 0:
+            pos_pct = (position_value / current_balance) * 100
+            if pos_pct > float(max_pos_pct):
+                return False, f"Размер позиции превышает лимит: {pos_pct:.2f}% / {max_pos_pct}%"
+
         return True, "Position limits OK"
     
     async def _halt_trading(self, reason: str):
@@ -389,12 +409,26 @@ class RiskManager:
             await self.reset_daily_counters()
 
         # Недельный сброс
-        reset_dow_str = self.config.get("weekly.reset_dow_utc", "MONDAY").upper()
-        days = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"]
-        if reset_dow_str in days:
-            reset_dow = days.index(reset_dow_str)
-            if now.weekday() == reset_dow and self.metrics.last_weekly_reset.date() < now.date():
-                 await self.reset_weekly_counters()
+        reset_dow_val = self.config.get("weekly.reset_dow_utc", "MONDAY")
+        dow_map = {"MONDAY":0,"TUESDAY":1,"WEDNESDAY":2,"THURSDAY":3,"FRIDAY":4,"SATURDAY":5,"SUNDAY":6}
+
+        if isinstance(reset_dow_val, str):
+            reset_dow_val = reset_dow_val.strip().upper()
+            if reset_dow_val not in dow_map:
+                self.logger.error(f"weekly.reset_dow_utc invalid: {reset_dow_val}")
+                return
+            reset_dow = dow_map[reset_dow_val]
+        else:
+            try:
+                reset_dow = int(reset_dow_val)
+                if not (0 <= reset_dow <= 6):
+                    raise ValueError
+            except Exception:
+                self.logger.error(f"weekly.reset_dow_utc must be MONDAY..SUNDAY or 0..6, got: {reset_dow_val}")
+                return
+
+        if now.weekday() == reset_dow and self.metrics.last_weekly_reset.date() < now.date():
+            await self.reset_weekly_counters()
 
     async def reset_daily_counters(self, manual: bool = False):
         """Сбрасывает дневные метрики."""
@@ -406,14 +440,12 @@ class RiskManager:
             self.metrics.daily_trades_count = 0
             self.metrics.last_daily_reset = datetime.now(timezone.utc)
 
-            # Возобновляем торговлю, если она была остановлена по дневным лимитам
-            if not self.metrics.trading_allowed and "дневной" in self.metrics.halt_reason.lower():
-                self.metrics.trading_allowed = True
-                self.metrics.halt_reason = ""
-                self.logger.info("Торговля возобновлена после дневного сброса.")
+            # Возобновляем торговлю, если она была остановлена
+            self.metrics.trading_allowed = True
+            self.metrics.halt_reason = ""
 
             log_msg = "сброшены вручную" if manual else "сброшены автоматически"
-            self.logger.info(f"✅ Дневные счетчики {log_msg}. Новый баланс: {current_balance:.2f}")
+            self.logger.info(f"✅ Дневные счетчики {log_msg}. Новый баланс: {current_balance:.2f}. Торговля разрешена.")
 
     async def reset_weekly_counters(self, manual: bool = False):
         """Сбрасывает недельные метрики."""
@@ -425,13 +457,12 @@ class RiskManager:
             # Недельное количество сделок обычно не сбрасывают, но можно добавить при необходимости
             self.metrics.last_weekly_reset = datetime.now(timezone.utc)
 
-            if not self.metrics.trading_allowed and "недельный" in self.metrics.halt_reason.lower():
-                self.metrics.trading_allowed = True
-                self.metrics.halt_reason = ""
-                self.logger.info("Торговля возобновлена после недельного сброса.")
+            # Возобновляем торговлю, если она была остановлена
+            self.metrics.trading_allowed = True
+            self.metrics.halt_reason = ""
 
             log_msg = "сброшены вручную" if manual else "сброшены автоматически"
-            self.logger.info(f"✅ Недельные счетчики {log_msg}. Новый баланс: {current_balance:.2f}")
+            self.logger.info(f"✅ Недельные счетчики {log_msg}. Новый баланс: {current_balance:.2f}. Торговля разрешена.")
 
     # --- Публичные методы для управления и получения статуса ---
 
@@ -449,7 +480,7 @@ class RiskManager:
                 "initialized": self.initialized,
                 "trading_allowed": self.metrics.trading_allowed,
                 "halt_reason": self.metrics.halt_reason,
-                "config": self.config._config, # Отдаем текущую конфигурацию
+                "config": self.config.snapshot(), # Используем публичный метод
                 "metrics": {
                     "daily": {
                         "pnl": self.metrics.daily_pnl,
@@ -550,15 +581,19 @@ class RiskManager:
 
 # --- Синглтон для глобального доступа ---
 
-_global_risk_manager: Optional[RiskManager] = None
+_rm_singleton: Optional["RiskManager"] = None
 
-def get_global_risk_manager() -> Optional[RiskManager]:
-    """Возвращает глобальный экземпляр RiskManager."""
-    return _global_risk_manager
+def get_risk_manager() -> "RiskManager":
+    """Backward-compatible accessor expected by trading_engine.py."""
+    if _rm_singleton is None:
+        raise RuntimeError("RiskManager singleton is not set. Call set_risk_manager(...) at boot.")
+    return _rm_singleton
 
-def set_global_risk_manager(manager: RiskManager):
-    """Устанавливает глобальный экземпляр RiskManager."""
-    global _global_risk_manager
-    if _global_risk_manager is None:
-        _global_risk_manager = manager
-        logging.getLogger(__name__).info("Глобальный экземпляр RiskManager установлен.")
+def set_risk_manager(rm: "RiskManager") -> None:
+    """Backward-compatible setter; always override."""
+    global _rm_singleton
+    _rm_singleton = rm
+
+# Оставь совместимость с твоими именами (алиасы):
+get_global_risk_manager = get_risk_manager
+set_global_risk_manager = set_risk_manager
