@@ -15,7 +15,7 @@ import traceback
 # Основные компоненты системы
 from core.trading_engine import TradingEngine
 from core.position_manager import PositionManager
-from core.risk_manager import RiskManager, get_risk_manager
+from core.risk_manager import RiskManager
 from exchanges.exchange_manager import exchange_manager
 from exchanges.exchange_factory import exchange_factory, create_bybit_adapter, test_all_exchanges
 from config.config_loader import config_loader, get_app_config, get_bybit_credentials
@@ -341,9 +341,10 @@ class VortexTradingBot:
             strategies_config = config_loader.get_config("strategies")
             self.mode = strategies_config.get("active_strategies", {}).get("mode", "signals")
             
-            # Создаем торговый движок
+            # Создаем торговый движок, передавая существующий risk_manager
             self.trading_engine = TradingEngine(
                 exchange=self.exchange,
+                risk_manager=self.risk_manager,
                 mode=self.mode
             )
             
@@ -351,11 +352,6 @@ class VortexTradingBot:
             if not await self.trading_engine.initialize():
                 self.logger.error("Не удалось инициализировать торговый движок")
                 return False
-            
-            # Получаем ссылку на риск-менеджер из торгового движка
-            self.risk_manager = get_risk_manager()
-            if not self.risk_manager:
-                self.logger.warning("⚠️ Риск-менеджер не найден в торговом движке")
             
             self.logger.info(f"✅ Торговый движок инициализирован в режиме: {self.mode}")
             return True

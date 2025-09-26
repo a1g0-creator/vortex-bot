@@ -22,7 +22,7 @@ class TradingEngine:
     Перенос из SimpleTradingBot + полная система управления рисками
     """
     
-    def __init__(self, exchange: BaseExchange, mode: str = "signals"):
+    def __init__(self, exchange: BaseExchange, risk_manager: RiskManager, mode: str = "signals"):
         self.exchange = exchange
         self.mode = mode  # "auto" или "signals"
         self.positions = {}  # {symbol: position_data}
@@ -37,9 +37,9 @@ class TradingEngine:
         self.initial_capital = 10000.0  # Будет обновлен при инициализации
         self.start_time = time.time()
         
-        # НОВОЕ: Добавляем риск-менеджер
-        self.risk_manager = RiskManager(exchange)
-        set_risk_manager(self.risk_manager)  # Устанавливаем глобальный экземпляр
+        # Используем переданный экземпляр риск-менеджера
+        self.risk_manager = risk_manager
+        set_risk_manager(self.risk_manager)  # Устанавливаем глобальный экземпляр для совместимости
         
         self.logger = logging.getLogger("TradingEngine")
     

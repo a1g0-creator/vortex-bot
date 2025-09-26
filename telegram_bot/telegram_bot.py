@@ -295,8 +295,6 @@ class TelegramBot:
             keyboard,
             resize_keyboard=True,
             one_time_keyboard=False,
-            # Добавляем is_persistent если доступно в PTB v20+
-            # is_persistent=True,  # раскомментировать если поддерживается
             selective=False,
             input_field_placeholder="Выберите команду..."
         )
@@ -311,7 +309,7 @@ class TelegramBot:
                 return False
 
             if escape and parse_mode in ['Markdown', 'MarkdownV2']:
-                message = self._escape_markdown(message)
+                message = self._escape_markdown_v2(message)
 
             notification = {
                 'message': message,
@@ -335,41 +333,31 @@ class TelegramBot:
 
     # Обратно-совместимые публичные методы
     async def notify(self, message: str, parse_mode: str = 'Markdown', escape: bool = False) -> bool:
-        """Совместимость со старым интерфейсом: отправка через очередь + ретраи"""
         return await self.send_message(message, parse_mode=parse_mode, escape=escape)
 
     async def notify_risk(self, message: str, parse_mode: str = 'Markdown', escape: bool = False) -> bool:
-        """Уведомления о рисках — тот же надёжный путь доставки"""
         return await self.send_message(message, parse_mode=parse_mode, escape=escape)
 
     async def notify_signal(self, symbol: str, side: str, price: float, reason: str = "") -> bool:
-        """Совместимость с прежним именем — alias к send_signal()"""
         return await self.send_signal(symbol, side, price, reason)
 
     async def send_signal(self, symbol: str, side: str, price: float, reason: str = "") -> bool:
-        """Отправка торгового сигнала"""
         emoji = "🟢" if side.upper() == "BUY" else "🔴"
         message = (
             f"{emoji} *ТОРГОВЫЙ СИГНАЛ*\n"
-            f"📊 {symbol}\n"
+            f"📊 {self._escape_md(symbol)}\n"
             f"🎯 {side.upper()}\n"
             f"💰 Цена: {price}\n"
         )
         if reason:
-            message += f"📝 Причина: {reason}"
+            message += f"📝 Причина: {self._escape_md(reason)}"
         
         return await self.send_message(message)
 
     async def send_startup_message(self) -> bool:
-        """
-        Публичный метод для ядра: отправляет приветствие и принудительно ставит нашу нижнюю клавиатуру.
-        Идемпотентен — можно звать повторно.
-        """
         if not self.application:
             self.logger.warning("send_startup_message: приложение Telegram не инициализировано")
             return False
-
-        # 1) Удалить старую (залипшую) клавиатуру у клиента
         try:
             await self._send_with_retry({
                 'message': "⏳ Обновляю меню…",
@@ -379,8 +367,6 @@ class TelegramBot:
             })
         except Exception as e:
             self.logger.warning(f"send_startup_message: не удалось удалить старое меню: {e}")
-
-        # 2) Отправить приветствие с нашей клавиатурой
         msg = (
             "🤖 *Vortex Trading Bot v2.1*\n"
             "Бот запущен и готов к работе.\n\n"
@@ -392,178 +378,117 @@ class TelegramBot:
     # ===== КОМАНДЫ =====
 
     async def _cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Команда /start"""
+        user = update.effective_user
+        self.logger.info(f"Команда /start от пользователя {user.username} ({user.id})")
+        config_status = "✅ Конфигурация загружена"
         try:
-            user = update.effective_user
-            self.logger.info(f"Команда /start от пользователя {user.username} ({user.id})")
-            
-            # Проверяем конфигурацию
-            config_status = "✅ Конфигурация загружена"
-            try:
-                telegram_config = config_loader.get_config("telegram")
-                bot_config = telegram_config.get("bot", {})
-                if bot_config.get("token") and bot_config.get("chat_id"):
-                    config_status += f"\n📱 Chat ID: {bot_config.get('chat_id')}"
-                else:
-                    config_status = "⚠️ Конфигурация неполная"
-            except:
-                config_status = "❌ Ошибка загрузки конфигурации"
-            
-            # Убираем залипшее старое меню у клиента
-            try:
-                await update.message.reply_text("⏳ Обновляю меню…", reply_markup=ReplyKeyboardRemove())
-            except Exception:
-                pass
-
-            message = (
-                f"👋 Привет, {user.first_name}!\n\n"
-                "🚀 *Vortex Trading Bot v2.1*\n"
-                "Профессиональный торговый бот с управлением рисками\n\n"
-                f"{config_status}\n\n"
-                "Используйте команды из меню или кнопки ниже.\n"
-                "Для справки используйте /help"
-            )
-            
-            keyboard = self._get_main_keyboard()
-            await update.message.reply_text(
-                message, 
-                reply_markup=keyboard,
-                parse_mode='Markdown'
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Ошибка команды /start: {e}")
-            await update.message.reply_text("❌ Произошла ошибка при инициализации")
+            telegram_config = config_loader.get_config("telegram")
+            bot_config = telegram_config.get("bot", {})
+            if bot_config.get("token") and bot_config.get("chat_id"):
+                config_status += f"\n📱 Chat ID: `{bot_config.get('chat_id')}`"
+            else:
+                config_status = "⚠️ Конфигурация неполная"
+        except:
+            config_status = "❌ Ошибка загрузки конфигурации"
+        try:
+            await update.message.reply_text("⏳ Обновляю меню…", reply_markup=ReplyKeyboardRemove())
+        except Exception:
+            pass
+        message = (
+            f"👋 Привет, {user.first_name}!\n\n"
+            "🚀 *Vortex Trading Bot v2.1*\n"
+            "Профессиональный торговый бот с управлением рисками\n\n"
+            f"{config_status}\n\n"
+            "Используйте команды из меню или кнопки ниже.\n"
+            "Для справки используйте /help"
+        )
+        keyboard = self._get_main_keyboard()
+        await update.message.reply_text(message, reply_markup=keyboard, parse_mode='Markdown')
 
     async def _cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Команда /status"""
-        try:
-            bot = self.trading_bot
-            
-            # Получаем статус системы
-            status = "🟢 Работает" if bot.is_running else "🔴 Остановлен"
-            uptime = time.time() - self.start_time
-            uptime_hours = uptime / 3600
-     
-            # Сообщение статуса
-            message = (
-                f"📊 *СТАТУС СИСТЕМЫ*\n\n"
-                f"Состояние: {status}\n"
-                f"Uptime: {uptime_hours:.2f} ч\n"
-                f"⏱️ Сообщения: OK={self.messages_sent} / FAIL={self.messages_failed}"
-            )
-            
-            # Добавляем информацию о режиме работы
-            if hasattr(bot, 'mode'):
-                message += f"\n🔧 Режим: {bot.mode}"
-            
-            await update.message.reply_text(message, parse_mode='Markdown')
-        except Exception as e:
-            self.logger.error(f"Ошибка команды /status: {e}")
-            await update.message.reply_text(f"❌ Ошибка: {e}")
+        bot = self.trading_bot
+        status = "🟢 Работает" if bot.is_running else "🔴 Остановлен"
+        uptime = time.time() - self.start_time
+        uptime_hours = uptime / 3600
+        message = (
+            f"📊 *СТАТУС СИСТЕМЫ*\n\n"
+            f"Состояние: {status}\n"
+            f"Uptime: {uptime_hours:.2f} ч\n"
+            f"⏱️ Сообщения: OK={self.messages_sent} / FAIL={self.messages_failed}"
+        )
+        if hasattr(bot, 'mode'):
+            message += f"\n🔧 Режим: `{bot.mode}`"
+        await update.message.reply_text(message, parse_mode='Markdown')
 
     async def _cmd_balance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Команда /balance"""
-        try:
-            # Пытаемся получить баланс через exchange
-            if hasattr(self.trading_bot, 'exchange') and self.trading_bot.exchange:
-                try:
-                    balance_info = await self.trading_bot.exchange.get_balance()
-                    if balance_info:
-                        message = "💰 *БАЛАНС АККАУНТА*\n\n"
-                        
-                        # Проверяем тип ответа - может быть dict или объект
-                        if hasattr(balance_info, 'items'):
-                            # Это словарь
-                            for currency, amount in balance_info.items():
-                                if float(amount) > 0:
-                                    message += f"{currency}: {amount}\n"
-                        elif hasattr(balance_info, '__dict__'):
-                            # Это объект - получаем его атрибуты
-                            for key, value in balance_info.__dict__.items():
-                                if isinstance(value, (int, float, str)) and str(value) != '0' and str(value) != '0.0':
-                                    message += f"{key}: {value}\n"
-                        elif isinstance(balance_info, (int, float)):
-                            # Это число - общий баланс
-                            message += f"USDT: {balance_info}\n"
-                        else:
-                            # Попробуем преобразовать в строку
-                            message += f"Баланс: {balance_info}\n"
-                            
-                        if message == "💰 *БАЛАНС АККАУНТА*\n\n":
-                            message += "Нет доступных балансов или все балансы равны нулю"
-                    else:
-                        message = "⚠️ Не удалось получить информацию о балансе"
-                except Exception as e:
-                    message = f"❌ Ошибка получения баланса: {e}"
-            else:
-                message = "⚠️ Биржа не подключена"
-            
-            await update.message.reply_text(message, parse_mode='Markdown')
-        except Exception as e:
-            self.logger.error(f"Ошибка команды /balance: {e}")
-            await update.message.reply_text(f"❌ Ошибка: {e}")
+        if hasattr(self.trading_bot, 'exchange') and self.trading_bot.exchange:
+            try:
+                balance_info = await self.trading_bot.exchange.get_balance()
+                if balance_info and hasattr(balance_info, 'total_wallet_balance'):
+                    message = f"💰 *БАЛАНС АККАУНТА*\n\n`{balance_info.total_wallet_balance:.2f}` USDT"
+                elif balance_info and isinstance(balance_info, dict):
+                    message = "💰 *БАЛАНС АККАУНТА*\n\n"
+                    for currency, amount in balance_info.items():
+                        if float(amount) > 0:
+                            message += f"*{self._escape_md(currency)}*: `{amount}`\n"
+                else:
+                    message = "⚠️ Не удалось получить информацию о балансе"
+            except Exception as e:
+                message = f"❌ Ошибка получения баланса: {e}"
+        else:
+            message = "⚠️ Биржа не подключена"
+        await update.message.reply_text(message, parse_mode='Markdown')
 
     async def _cmd_positions(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Команда /positions"""
-        try:
-            # Пытаемся получить позиции
-            if hasattr(self.trading_bot, 'exchange') and self.trading_bot.exchange:
-                try:
-                    positions = await self.trading_bot.exchange.get_positions()
-                    if positions:
-                        message = "📈 *ОТКРЫТЫЕ ПОЗИЦИИ*\n\n"
-                        for pos in positions:
-                            if float(pos.get('size', 0)) != 0:
-                                symbol = pos.get('symbol', 'N/A')
-                                side = pos.get('side', 'N/A')
-                                size = pos.get('size', 'N/A')
-                                pnl = pos.get('unrealizedPnl', 0)
-                                pnl_emoji = "🟢" if float(pnl) >= 0 else "🔴"
-                                message += f"• {symbol} {side} {size}\n  {pnl_emoji} PnL: {pnl} USDT\n\n"
-                        
-                        if message == "📈 *ОТКРЫТЫЕ ПОЗИЦИИ*\n\n":
-                            message += "Нет открытых позиций"
-                    else:
-                        message = "📈 *ОТКРЫТЫЕ ПОЗИЦИИ*\n\nНет открытых позиций"
-                except Exception as e:
-                    message = f"❌ Ошибка получения позиций: {e}"
-            else:
-                message = "⚠️ Биржа не подключена"
-            
-            await update.message.reply_text(message, parse_mode='Markdown')
-        except Exception as e:
-            self.logger.error(f"Ошибка команды /positions: {e}")
-            await update.message.reply_text(f"❌ Ошибка: {e}")
+        if hasattr(self.trading_bot, 'exchange') and self.trading_bot.exchange:
+            try:
+                positions = await self.trading_bot.exchange.get_positions()
+                if positions:
+                    message = "📈 *ОТКРЫТЫЕ ПОЗИЦИИ*\n\n"
+                    for pos in positions:
+                        if float(pos.get('size', 0)) != 0:
+                            pnl_emoji = "🟢" if float(pos.get('unrealizedPnl', 0)) >= 0 else "🔴"
+                            message += (
+                                f"*{self._escape_md(pos.get('symbol'))}* "
+                                f"`{pos.get('side', 'N/A')}` `{pos.get('size', 'N/A')}`\n"
+                                f"  {pnl_emoji} PnL: `{pos.get('unrealizedPnl', 0)}` USDT\n\n"
+                            )
+                    if message == "📈 *ОТКРЫТЫЕ ПОЗИЦИИ*\n\n":
+                        message += "Нет открытых позиций"
+                else:
+                    message = "📈 *ОТКРЫТЫЕ ПОЗИЦИИ*\n\nНет открытых позиций"
+            except Exception as e:
+                message = f"❌ Ошибка получения позиций: {e}"
+        else:
+            message = "⚠️ Биржа не подключена"
+        await update.message.reply_text(message, parse_mode='Markdown')
 
     async def _cmd_mode(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Команда /mode"""
-        try:
-            bot = self.trading_bot
-            current_mode = getattr(bot, 'mode', 'unknown')
-            
-            message = (
-                f"⚙️ *РЕЖИМ РАБОТЫ*\n\n"
-                f"Текущий режим: *{current_mode}*\n\n"
-                "Доступные режимы:\n"
-                "• signals - только сигналы\n"
-                "• auto - автоматическая торговля\n"
-                "• paper - бумажная торговля"
-            )
-            
-            await update.message.reply_text(message, parse_mode='Markdown')
-        except Exception as e:
-            self.logger.error(f"Ошибка команды /mode: {e}")
-            await update.message.reply_text(f"❌ Ошибка: {e}")
+        bot = self.trading_bot
+        current_mode = getattr(bot, 'mode', 'unknown')
+        message = (
+            f"⚙️ *РЕЖИМ РАБОТЫ*\n\n"
+            f"Текущий режим: *{self._escape_md(current_mode)}*\n\n"
+            "Доступные режимы:\n"
+            "• `signals` - только сигналы\n"
+            "• `auto` - автоматическая торговля\n"
+            "• `paper` - бумажная торговля"
+        )
+        await update.message.reply_text(message, parse_mode='Markdown')
 
     # ===== КОМАНДЫ РИСК-МЕНЕДЖМЕНТА =====
 
-    def _fmt(self, value: Any) -> str:
-        """Форматирует значение в `backticks` для Markdown."""
-        if isinstance(value, bool):
-            return f"`{str(value).lower()}`"
-        if isinstance(value, str) and (value.upper() in ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"]):
-            return f"`{value.upper()}`"
+    @staticmethod
+    def _escape_md(text: Any) -> str:
+        """Escapes special characters for Telegram's MarkdownV1."""
+        text = str(text)
+        for char in ['_', '*', '`', '[']:
+            text = text.replace(char, f'\\{char}')
+        return text
+
+    @staticmethod
+    def _fmt(value: Any) -> str:
+        """Formats a value in backticks for Markdown."""
         return f"`{value}`"
 
     async def _cmd_risk(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -573,35 +498,26 @@ class TelegramBot:
             if not rm:
                 await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
                 return
-
             status = await rm.get_status()
-            
             enabled_str = "включен" if status.get('enabled', False) else "выключен"
             enabled_emoji = "✅" if status.get('enabled', False) else "⛔"
-            
             message = [f"🛡️ *Risk Manager*: {enabled_emoji} {enabled_str}"]
-
             daily = status.get('daily', {})
             daily_loss = daily.get('realized_loss', 0)
             daily_max_loss = daily.get('max_abs_loss', '??')
             daily_trades = daily.get('used_trades', 0)
             daily_max_trades = daily.get('max_trades', '??')
-            
             message.append(
                 f"├─ *Daily*: trades {self._fmt(f'{daily_trades}/{daily_max_trades}')}, "
                 f"loss {self._fmt(f'{daily_loss:.2f}')} / {self._fmt(daily_max_loss)}"
             )
-
             weekly = status.get('weekly', {})
             weekly_loss = weekly.get('realized_loss', 0)
             weekly_max_loss = weekly.get('max_abs_loss', '??')
-            
             message.append(
                 f"└─ *Weekly*: loss {self._fmt(f'{weekly_loss:.2f}')} / {self._fmt(weekly_max_loss)}"
             )
-
             await update.message.reply_text("\n".join(message), parse_mode='Markdown')
-
         except Exception as e:
             self.logger.error(f"Ошибка команды /risk: {e}\n{traceback.format_exc()}")
             await update.message.reply_text(f"❌ Ошибка получения статуса рисков: {e}")
@@ -613,166 +529,117 @@ class TelegramBot:
             if not rm:
                 await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
                 return
-
             limits = await rm.show_limits()
             if not limits:
                 await update.message.reply_text("⚠️ Не удалось загрузить лимиты рисков.")
                 return
-
             message = ["🧩 *RISK LIMITS* (from risk.yaml)"]
-            
             message.append(
                 f"enabled: {self._fmt(limits.get('enabled'))}, "
                 f"currency: {self._fmt(limits.get('currency'))}, "
                 f"persist: {self._fmt(limits.get('persist_runtime_updates'))}"
             )
-
             def format_section(title: str, data: Dict[str, Any]):
-                parts = [f"*{title}*:"]
+                parts = [f"*{self._escape_md(title)}*:"]
                 for key, value in data.items():
                     if isinstance(value, dict):
+                        # Avoid curly braces to prevent internal tool errors
                         triggers_str = ", ".join([f"{k}={v}" for k, v in value.items()])
-                        parts.append(f"{key}={self._fmt('{' + triggers_str + '}')}")
+                        parts.append(f"{self._escape_md(key)}: [{triggers_str}]")
                     else:
-                        parts.append(f"{key}={self._fmt(value)}")
+                        parts.append(f"{self._escape_md(key)}={self._fmt(value)}")
                 message.append(" ".join(parts))
-
-            sections = [
-                "daily", "weekly", "position", "circuit_breaker",
-                "overtrading_protection", "adaptive_risk", "monitoring"
-            ]
-
+            sections = ["daily", "weekly", "position", "circuit_breaker", "overtrading_protection", "adaptive_risk", "monitoring"]
             for section_name in sections:
-                section_data = limits.get(section_name)
-                if section_data:
+                if section_data := limits.get(section_name):
                     format_section(section_name, section_data)
-            
             await update.message.reply_text("\n".join(message), parse_mode='Markdown')
-
         except Exception as e:
             self.logger.error(f"Ошибка команды /risk_show: {e}\n{traceback.format_exc()}")
             await update.message.reply_text(f"❌ Ошибка получения детальных лимитов: {e}")
 
     async def _cmd_risk_enable(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда /risk_enable. Только для администраторов."""
-        try:
-            if not await self._is_admin_user(update.effective_user.id):
-                await update.message.reply_text("⛔ Недостаточно прав.")
-                return
-            
-            rm = self.trading_bot.risk_manager
-            if not rm:
-                await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
-                return
-            
-            await rm.enable()
-            self.logger.info(f"Risk Manager enabled by admin {update.effective_user.id}")
-            await update.message.reply_text("✅ Риск-менеджмент *включен*.", parse_mode='Markdown')
-
-        except Exception as e:
-            self.logger.error(f"Ошибка команды /risk_enable: {e}")
-            await update.message.reply_text(f"❌ Ошибка: {e}")
+        if not await self._is_admin_user(update.effective_user.id):
+            await update.message.reply_text("⛔ Недостаточно прав.")
+            return
+        rm = self.trading_bot.risk_manager
+        if not rm:
+            await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
+            return
+        await rm.enable()
+        self.logger.info(f"Risk Manager enabled by admin {update.effective_user.id}")
+        await update.message.reply_text("✅ Риск-менеджмент *включен*.", parse_mode='Markdown')
 
     async def _cmd_risk_disable(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда /risk_disable. Только для администраторов."""
-        try:
-            if not await self._is_admin_user(update.effective_user.id):
-                await update.message.reply_text("⛔ Недостаточно прав.")
-                return
-            
-            rm = self.trading_bot.risk_manager
-            if not rm:
-                await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
-                return
-
-            await rm.disable()
-            self.logger.info(f"Risk Manager disabled by admin {update.effective_user.id}")
-            await update.message.reply_text("⛔ Риск-менеджмент *выключен*.", parse_mode='Markdown')
-
-        except Exception as e:
-            self.logger.error(f"Ошибка команды /risk_disable: {e}")
-            await update.message.reply_text(f"❌ Ошибка: {e}")
+        if not await self._is_admin_user(update.effective_user.id):
+            await update.message.reply_text("⛔ Недостаточно прав.")
+            return
+        rm = self.trading_bot.risk_manager
+        if not rm:
+            await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
+            return
+        await rm.disable()
+        self.logger.info(f"Risk Manager disabled by admin {update.effective_user.id}")
+        await update.message.reply_text("⛔ Риск-менеджмент *выключен*.", parse_mode='Markdown')
 
     async def _cmd_risk_reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда /risk_reset. Сбрасывает счетчики. Только для администраторов."""
-        try:
-            if not await self._is_admin_user(update.effective_user.id):
-                await update.message.reply_text("⛔ Недостаточно прав.")
-                return
-
-            rm = self.trading_bot.risk_manager
-            if not rm:
-                await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
-                return
-
-            arg = context.args[0].lower() if context.args else "all"
-            
-            if arg == "daily":
-                await rm.reset_daily_counters(manual=True)
-                message = "✅ Дневные счетчики сброшены."
-            elif arg == "weekly":
-                await rm.reset_weekly_counters(manual=True)
-                message = "✅ Недельные счетчики сброшены."
-            elif arg == "all":
-                await rm.reset_counters(manual=True)
-                message = "✅ Все счетчики (daily, weekly) сброшены."
-            else:
-                message = "⚠️ Неверный аргумент. Используйте `daily`, `weekly` или `all`."
-
-            self.logger.info(f"Risk counters reset for '{arg}' by admin {update.effective_user.id}")
-            await update.message.reply_text(message)
-
-        except Exception as e:
-            self.logger.error(f"Ошибка команды /risk_reset: {e}")
-            await update.message.reply_text(f"❌ Ошибка сброса счетчиков: {e}")
+        if not await self._is_admin_user(update.effective_user.id):
+            await update.message.reply_text("⛔ Недостаточно прав.")
+            return
+        rm = self.trading_bot.risk_manager
+        if not rm:
+            await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
+            return
+        arg = context.args[0].lower() if context.args else "all"
+        if arg == "daily":
+            await rm.reset_daily_counters(manual=True)
+            message = "✅ Дневные счетчики сброшены."
+        elif arg == "weekly":
+            await rm.reset_weekly_counters(manual=True)
+            message = "✅ Недельные счетчики сброшены."
+        elif arg == "all":
+            await rm.reset_counters(manual=True)
+            message = "✅ Все счетчики (daily, weekly) сброшены."
+        else:
+            message = "⚠️ Неверный аргумент. Используйте `daily`, `weekly` или `all`."
+        self.logger.info(f"Risk counters reset for '{arg}' by admin {update.effective_user.id}")
+        await update.message.reply_text(message)
 
     async def _cmd_risk_set(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """
-        Команда /risk_set <scope> <key> <value>.
-        Изменяет параметр риска. Только для администраторов.
-        """
-        try:
-            if not await self._is_admin_user(update.effective_user.id):
-                await update.message.reply_text("⛔ Недостаточно прав.")
-                return
-
-            rm = self.trading_bot.risk_manager
-            if not rm:
-                await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
-                return
-
-            args = context.args
-            if len(args) < 3:
-                await update.message.reply_text(
-                    "⚠️ Неверный формат.\nИспользуйте: `/risk_set <scope> <key> <value>`\n"
-                    "Пример: `/risk_set daily max_abs_loss 750`",
-                    parse_mode='Markdown'
-                )
-                return
-
-            scope, key, value_str = args[0], args[1], " ".join(args[2:])
-
-            value: Any
-            if value_str.lower() in ['true', 'on', 'yes', '1']: value = True
-            elif value_str.lower() in ['false', 'off', 'no', '0']: value = False
-            else:
-                try:
-                    value = float(value_str) if '.' in value_str else int(value_str)
-                except ValueError:
-                    value = value_str
-
-            if await rm.set_limit(scope, key, value):
-                response = f"✅ Обновлено: {scope}.{key} = {self._fmt(value)}"
-                self.logger.info(f"Risk limit '{scope}.{key}' set to '{value}' by admin {update.effective_user.id}")
-            else:
-                response = f"⚠️ Ошибка установки {scope}.{key}. Проверьте путь и тип значения."
-                self.logger.warning(f"Failed to set limit '{scope}.{key}' to '{value}'")
-
-            await update.message.reply_text(response)
-
-        except Exception as e:
-            self.logger.error(f"Критическая ошибка в /risk_set: {e}\n{traceback.format_exc()}")
-            await update.message.reply_text(f"❌ Критическая ошибка: {e}")
+        """Команда /risk_set <scope> <key> <value>. Только для администраторов."""
+        if not await self._is_admin_user(update.effective_user.id):
+            await update.message.reply_text("⛔ Недостаточно прав.")
+            return
+        rm = self.trading_bot.risk_manager
+        if not rm:
+            await update.message.reply_text("⚠️ Риск-менеджер недоступен.")
+            return
+        if len(context.args) < 3:
+            await update.message.reply_text(
+                "⚠️ Неверный формат.\nИспользуйте: `/risk_set <scope> <key> <value>`\n"
+                "Пример: `/risk_set daily max_abs_loss 750`",
+                parse_mode='Markdown'
+            )
+            return
+        scope, key, value_str = context.args[0], context.args[1], " ".join(context.args[2:])
+        value: Any
+        if value_str.lower() in ['true', 'on', 'yes', '1']: value = True
+        elif value_str.lower() in ['false', 'off', 'no', '0']: value = False
+        else:
+            try:
+                value = float(value_str) if '.' in value_str else int(value_str)
+            except ValueError:
+                value = value_str
+        if await rm.set_limit(scope, key, value):
+            response = f"✅ Обновлено: {self._escape_md(scope)}.{self._escape_md(key)} = {self._fmt(value)}"
+            self.logger.info(f"Risk limit '{scope}.{key}' set to '{value}' by admin {update.effective_user.id}")
+        else:
+            response = f"⚠️ Ошибка установки {self._escape_md(scope)}.{self._escape_md(key)}. Проверьте путь и тип значения."
+            self.logger.warning(f"Failed to set limit '{scope}.{key}' to '{value}'")
+        await update.message.reply_text(response, parse_mode='Markdown')
 
     async def _cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Команда /help"""
@@ -783,7 +650,6 @@ class TelegramBot:
             "💰 `/balance` - Баланс аккаунта\n"
             "📈 `/positions` - Открытые позиции\n"
             "⚙️ `/mode` - Текущий режим\n\n"
-            
             "*Управление рисками:*\n"
             "🛡️ `/risk` - Краткий статус рисков\n"
             "📋 `/risk_show` - Детальные лимиты\n"
@@ -791,173 +657,92 @@ class TelegramBot:
             "✅ `/risk_enable` - Включить риски\n"
             "⛔ `/risk_disable` - Выключить риски\n"
             "🔄 `/risk_reset [daily|weekly|all]` - Сброс счетчиков\n\n"
-            
             "📘 Используйте кнопки ниже для быстрого доступа к основным действиям."
         )
         await update.message.reply_text(message, parse_mode='Markdown')
 
     async def _on_button_click(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик нажатий кнопок"""
-        try:
-            text = update.message.text
-            
-            # Маппинг кнопок на команды
-            button_commands = {
-                "📊 Статус": self._cmd_status,
-                "💰 Баланс": self._cmd_balance,
-                "📈 Позиции": self._cmd_positions,
-                "🛡️ Риски": self._cmd_risk_show,  # Показываем детальные риски
-                "⚙️ Режим": self._cmd_mode,
-                "🆘 Помощь": self._cmd_help
-            }
-            
-            handler = button_commands.get(text)
-            if handler:
-                await handler(update, context)
-            else:
-                await update.message.reply_text(
-                    "❓ Неизвестная команда. Используйте кнопки меню или команды."
-                )
-                
-        except Exception as e:
-            self.logger.error(f"Ошибка обработки кнопки: {e}")
-            await update.message.reply_text(f"❌ Ошибка обработки команды: {e}")
+        button_commands = {
+            "📊 Статус": self._cmd_status, "💰 Баланс": self._cmd_balance,
+            "📈 Позиции": self._cmd_positions, "🛡️ Риски": self._cmd_risk_show,
+            "⚙️ Режим": self._cmd_mode, "🆘 Помощь": self._cmd_help
+        }
+        if handler := button_commands.get(update.message.text):
+            await handler(update, context)
+        else:
+            await update.message.reply_text("❓ Неизвестная команда. Используйте кнопки меню или команды.")
 
     async def _is_admin_user(self, user_id: int) -> bool:
-        """Проверка прав администратора"""
         try:
-            # Получаем список админов из конфигурации
             telegram_config = config_loader.get_config("telegram")
-            admin_ids = telegram_config.get("users", {}).get("admin_users", [])
-            
-            # Конвертируем в строки для сравнения
-            admin_ids = [str(uid) for uid in admin_ids]
-            
+            admin_ids = [str(uid) for uid in telegram_config.get("users", {}).get("admin_users", [])]
             return str(user_id) in admin_ids or str(user_id) == str(self.chat_id)
         except Exception as e:
             self.logger.error(f"Ошибка проверки прав администратора: {e}")
             return False
 
     # ===== ЖИЗНЕННЫЙ ЦИКЛ =====
-
     async def run(self):
-        """
-        Публичный метод (ожидается ядром): идемпотентно инициализирует, запускает polling
-        и отправляет стартовое сообщение с клавиатурой.
-        """
+        if not self.application:
+            if not await self.initialize():
+                raise RuntimeError("TelegramBot.run(): initialize() failed")
+        await self.start()
         try:
-            # initialize() уже вызывается в ядре, но делаем безопасно
-            if not self.application:
-                ok = await self.initialize()
-                if not ok:
-                    raise RuntimeError("TelegramBot.run(): initialize() failed")
-
-            # Старт polling
-            await self.start()
-
-            # Стартовое приветствие/клава (не падаем по ошибкам)
-            try:
-                await self.send_startup_message()
-            except Exception as e:
-                self.logger.warning(f"run(): не удалось отправить стартовое сообщение: {e}")
-
+            await self.send_startup_message()
         except Exception as e:
-            self.logger.error(f"Ошибка в telegram_bot.run(): {e}")
-            raise
+            self.logger.warning(f"run(): не удалось отправить стартовое сообщение: {e}")
 
     async def start(self):
-        """Запуск Telegram бота (идемпотентно)"""
-        try:
-            if not self.application:
-                self.logger.warning("Telegram бот не инициализирован")
-                return
-
-            updater = getattr(self.application, "updater", None)
-            if updater and getattr(updater, "running", False):
-                self.logger.info("Telegram бот уже запущен")
-                self.is_running = True
-                return
-
-            await self.application.start()
-            if updater:
-                await updater.start_polling()
-
+        if not self.application:
+            self.logger.warning("Telegram бот не инициализирован")
+            return
+        if (updater := getattr(self.application, "updater", None)) and getattr(updater, "running", False):
+            self.logger.info("Telegram бот уже запущен")
             self.is_running = True
-            self.logger.info("✅ Telegram бот запущен и готов к работе")
-        except Exception as e:
-            self.logger.error(f"Ошибка запуска Telegram бота: {e}")
+            return
+        await self.application.start()
+        if updater:
+            await updater.start_polling()
+        self.is_running = True
+        self.logger.info("✅ Telegram бот запущен и готов к работе")
 
     async def stop(self):
-        """Остановка Telegram бота (идемпотентно и безопасно)"""
-        try:
-            # 1) Остановить consumer, если жив
-            if self.consumer_task and not self.consumer_task.done():
-                self.consumer_task.cancel()
-                try:
-                    await self.consumer_task
-                except asyncio.CancelledError:
-                    pass
-                self.logger.debug("Consumer уведомлений остановлен")
-            self.consumer_task = None
-
-            if not self.application:
-                self.is_running = False
-                self.logger.info("Telegram бот не инициализирован — нечего останавливать")
-                return
-
-            # 2) Остановить polling, если живо
-            updater = getattr(self.application, "updater", None)
-            if updater and getattr(updater, "running", False):
-                try:
-                    await updater.stop()
-                    self.logger.debug("Telegram polling остановлен")
-                except Exception as e:
-                    self.logger.warning(f"Ошибка остановки polling: {e}")
-
-            # 3) Остановить application
+        if self.consumer_task and not self.consumer_task.done():
+            self.consumer_task.cancel()
             try:
-                await self.application.stop()
-                self.logger.debug("Telegram application остановлен")
-            except Exception as e:
-                self.logger.warning(f"Ошибка остановки application: {e}")
-
-            # 4) Закрыть application
-            try:
-                await self.application.shutdown()
-                self.logger.debug("Telegram application закрыт")
-            except Exception as e:
-                self.logger.warning(f"Ошибка закрытия application: {e}")
-
+                await self.consumer_task
+            except asyncio.CancelledError:
+                pass
+            self.logger.debug("Consumer уведомлений остановлен")
+        self.consumer_task = None
+        if not self.application:
             self.is_running = False
-            self.application = None
-            self.logger.info("✅ Telegram бот корректно остановлен")
-
-        except Exception as e:
-            self.logger.error(f"Ошибка остановки Telegram бота: {e}")
-            self.is_running = False
+            return
+        if (updater := getattr(self.application, "updater", None)) and getattr(updater, "running", False):
+            await updater.stop()
+        await self.application.stop()
+        await self.application.shutdown()
+        self.is_running = False
+        self.application = None
+        self.logger.info("✅ Telegram бот корректно остановлен")
 
     # ===== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ =====
-
     @staticmethod
-    def _escape_markdown(text: str) -> str:
-        """Экранирование специальных символов для Markdown"""
-        # Символы, требующие экранирования в MarkdownV2
+    def _escape_markdown_v2(text: str) -> str:
+        """Экранирование специальных символов для MarkdownV2."""
         special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-        
         for char in special_chars:
             text = text.replace(char, f'\\{char}')
-        
         return text
 
     def notify_system(self, message: str) -> bool:
-        """Системные уведомления - синхронная версия для совместимости"""
         try:
-            # Создаем задачу в event loop
             loop = asyncio.get_event_loop()
+            task = self.send_message(f"🔧 СИСТЕМА: {message}")
             if loop.is_running():
-                asyncio.create_task(self.send_message(f"🔧 СИСТЕМА: {message}"))
+                asyncio.create_task(task)
             else:
-                loop.run_until_complete(self.send_message(f"🔧 СИСТЕМА: {message}"))
+                loop.run_until_complete(task)
             return True
         except Exception as e:
             self.logger.error(f"Ошибка системного уведомления: {e}")
